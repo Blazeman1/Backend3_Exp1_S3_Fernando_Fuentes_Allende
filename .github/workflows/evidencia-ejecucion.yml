@@ -1,0 +1,108 @@
+name: Evidencia de ejecución - Banco XYZ Batch
+
+# Este workflow compila el proyecto y ejecuta los 3 Jobs de Spring Batch contra una
+# instancia real de PostgreSQL, dejando los logs de consola como un artefacto descargable.
+# Es la "corrida real" del proyecto: se ejecuta en la infraestructura de GitHub Actions,
+# que sí tiene acceso a Maven Central y Docker Hub (a diferencia de algunos entornos
+# restringidos), por lo que sirve como evidencia reproducible y verificable por cualquiera
+# que abra la pestaña "Actions" del repositorio.
+#
+# Diseño defensivo: cada paso que puede fallar por una razón de negocio (no de infraestructura)
+# usa "continue-on-error" y el paso de publicación final usa "if: always()", de modo que
+# incluso una corrida con problemas deja evidencia descargable para diagnosticar sin tener
+# que reproducir el problema localmente.
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: {}   # permite lanzarlo manualmente con un click desde la pestaña Actions
+
+jobs:
+  ejecutar-jobs-batch:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: banco_xyz
+          POSTGRES_USER: banco_xyz
+          POSTGRES_PASSWORD: banco_xyz
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U banco_xyz -d banco_xyz"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Crear carpeta de evidencias
+        run: mkdir -p evidencias-ci
+
+      - name: Compilar el proyecto (mvn clean package)
+        run: mvn -B clean package | tee evidencias-ci/evidencia-01-build.log
+
+      - name: Ejecutar Job 1 - Reporte de Transacciones Diarias
+        continue-on-error: true
+        run: |
+          java -jar target/banco-xyz-batch-1.0.0.jar transacciones \
+            | tee evidencias-ci/evidencia-02-job-transacciones.log
+
+      - name: Ejecutar Job 2 - Cálculo de Intereses Mensuales
+        continue-on-error: true
+        run: |
+          java -jar target/banco-xyz-batch-1.0.0.jar intereses \
+            | tee evidencias-ci/evidencia-03-job-intereses.log
+
+      - name: Ejecutar Job 3 - Generación de Estados de Cuenta Anuales
+        continue-on-error: true
+        run: |
+          java -jar target/banco-xyz-batch-1.0.0.jar cuentas-anuales \
+            | tee evidencias-ci/evidencia-04-job-cuentas-anuales.log
+
+      - name: Ejecutar Job 2 contra el dataset original (rama REVISION_REQUERIDA del decider)
+        continue-on-error: true
+        run: |
+          java -jar target/banco-xyz-batch-1.0.0.jar intereses \
+            --batch.rutas.intereses=classpath:sample-data/intereses.csv \
+            | tee evidencias-ci/evidencia-05-job-intereses-sample-data.log
+
+      - name: Verificar resultados en PostgreSQL
+        continue-on-error: true
+        env:
+          PGPASSWORD: banco_xyz
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+          {
+            echo "=== resumen_transacciones_diarias ==="
+            psql -h localhost -U banco_xyz -d banco_xyz -c "SELECT * FROM resumen_transacciones_diarias;"
+            echo
+            echo "=== cuentas_interes (10 primeras filas) ==="
+            psql -h localhost -U banco_xyz -d banco_xyz -c "SELECT * FROM cuentas_interes LIMIT 10;"
+            echo
+            echo "=== estados_cuenta_anuales (10 primeras filas) ==="
+            psql -h localhost -U banco_xyz -d banco_xyz -c "SELECT * FROM estados_cuenta_anuales LIMIT 10;"
+            echo
+            echo "=== conteo de anomalias detectadas por Job 1 ==="
+            psql -h localhost -U banco_xyz -d banco_xyz -c "SELECT es_anomalia, COUNT(*) FROM transacciones_procesadas GROUP BY es_anomalia;"
+          } | tee evidencias-ci/evidencia-06-consultas-sql.log
+
+      - name: Publicar evidencias como artefacto descargable
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencia-ejecucion-banco-xyz
+          path: evidencias-ci/
+          retention-days: 90
+          if-no-files-found: warn

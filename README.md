@@ -40,10 +40,14 @@ procesamiento en chunks y multithreading que exige la actividad. Por eso:
 
 ```
 banco-xyz-batch/
+├── .github/workflows/
+│   └── evidencia-ejecucion.yml     # CI: compila y corre los 3 Jobs, publica los logs como artefacto
 ├── docker-compose.yml              # PostgreSQL para desarrollo local
 ├── pom.xml
+├── evidencias/                     # Destino de los logs/capturas de la corrida real (sección 9)
 ├── scripts/
-│   └── generar_datos.py            # Generador del dataset ampliado (reproducible, seed fija)
+│   ├── generar_datos.py            # Generador del dataset ampliado (reproducible, seed fija)
+│   └── generar_evidencias.sh       # Automatiza la corrida local completa (Opción B, sección 9)
 ├── src/main/resources/
 │   ├── application.yml
 │   ├── schema.sql                  # Tablas de negocio (metadata de Spring Batch se autogenera)
@@ -192,67 +196,11 @@ cómo los hilos `Batch-Thread-1/2/3` procesan chunks en paralelo. Además:
 Estos logs son la base para decidir si el tamaño de chunk o el número de hilos deben
 ajustarse ante un aumento del volumen de datos.
 
-## 8. Cómo ejecutar el proyecto
-
-### Prerrequisitos
-
-- JDK 21
-- Maven 3.9+
-- Docker (para levantar PostgreSQL) — o una instancia PostgreSQL propia
-
-### Paso a paso
-
-```bash
-# 1. Levantar PostgreSQL
-docker compose up -d
-
-# 2. Compilar
-mvn clean package
-
-# 3. Ejecutar un Job (las tablas se crean automáticamente en el primer arranque)
-java -jar target/banco-xyz-batch-1.0.0.jar transacciones
-java -jar target/banco-xyz-batch-1.0.0.jar intereses
-java -jar target/banco-xyz-batch-1.0.0.jar cuentas-anuales
-
-# ...o los tres en secuencia:
-java -jar target/banco-xyz-batch-1.0.0.jar todos
-```
-
-También se puede ejecutar directamente con `mvn spring-boot:run -Dspring-boot.run.arguments=transacciones`
-durante el desarrollo.
-
-### Ver la rama "REVISION_REQUERIDA" del decider
-
-El dataset ampliado (`data/`) tiene una tasa de error controlada (~15%), por debajo del
-umbral de 20%, por lo que normalmente el flujo sigue el camino `CALIDAD_OK`. Para ver la
-rama alterna en acción, se puede apuntar un Job al dataset original y pequeño (con ~60% de
-registros inválidos en `intereses.csv`):
-
-```bash
-java -jar target/banco-xyz-batch-1.0.0.jar intereses \
-  --batch.rutas.intereses=classpath:sample-data/intereses.csv
-```
-
-### Verificar los resultados en la base de datos
-
-```bash
-docker exec -it banco-xyz-postgres psql -U banco_xyz -d banco_xyz -c "SELECT * FROM resumen_transacciones_diarias;"
-docker exec -it banco-xyz-postgres psql -U banco_xyz -d banco_xyz -c "SELECT * FROM cuentas_interes LIMIT 10;"
-docker exec -it banco-xyz-postgres psql -U banco_xyz -d banco_xyz -c "SELECT * FROM estados_cuenta_anuales LIMIT 10;"
-```
-
-## 9. Evidencia de ejecución
-
-La carpeta [`evidencias/`](evidencias/) está preparada para alojar las capturas de pantalla
-y/o salidas de consola de cada Job, tal como exige la entrega. Sugerencia de contenido
-mínimo por Job: (a) el comando ejecutado, (b) el log completo desde `INICIO JOB` hasta
-`FIN JOB` con el resumen de `RendimientoStepListener`, y (c) una consulta SQL mostrando los
-datos ya escritos en la tabla destino.
-
-## 10. Cómo subir este proyecto a tu cuenta de GitHub
+## 8. Cómo subir este proyecto a tu cuenta de GitHub
 
 Este proyecto ya quedó inicializado como repositorio Git local (ver `git log`). Para
-publicarlo en tu propia cuenta:
+publicarlo en tu propia cuenta —paso previo obligatorio para la Opción A de la sección
+siguiente—:
 
 ```bash
 # 1. Crea un repositorio vacío en GitHub (sin README/licencia) llamado, por ejemplo,
@@ -264,7 +212,73 @@ git branch -M main
 git push -u origin main
 ```
 
-## 11. Trazabilidad con la pauta de evaluación formativa
+## 9. Cómo obtener la evidencia de ejecución real
+
+Hay dos caminos, no excluyentes, para obtener la "corrida real" del proyecto:
+
+### Opción A — Automática, vía GitHub Actions (recomendada, no requiere instalar nada)
+
+El proyecto incluye
+[`.github/workflows/evidencia-ejecucion.yml`](.github/workflows/evidencia-ejecucion.yml),
+un workflow que compila el proyecto, levanta un PostgreSQL real como servicio, ejecuta los 3
+Jobs (más una cuarta corrida del Job de intereses contra `sample-data/` para exhibir la rama
+`REVISION_REQUERIDA` del decider) y publica todos los logs como un artefacto descargable.
+
+1. Haz `git push` (paso anterior). El workflow se dispara automáticamente.
+2. En GitHub, entra a la pestaña **Actions** de tu repositorio y abre la ejecución más
+   reciente ("Evidencia de ejecución - Banco XYZ Batch"). Tarda 2-3 minutos.
+3. Si necesitas volver a lanzarlo sin hacer otro commit, usa el botón **Run workflow**
+   (está habilitado gracias a `workflow_dispatch`).
+4. Al terminar en verde, baja hasta la sección **Artifacts** de esa misma página y descarga
+   `evidencia-ejecucion-banco-xyz.zip`. Contiene 6 archivos `.log` con la salida completa de
+   consola: compilación, cada uno de los 3 Jobs, la corrida de la rama alterna del decider, y
+   las consultas SQL de verificación.
+5. Descomprime ese zip dentro de `evidencias/` y toma además una captura de pantalla de la
+   página de Actions en verde (el resumen del run) — esa captura, sumada a los `.log`, es la
+   evidencia que exigen las instrucciones.
+
+Esta corrida es real: un runner de GitHub compila el JAR con Maven Central, levanta un
+contenedor de PostgreSQL de verdad y ejecuta la aplicación exactamente igual que en tu propia
+máquina — simplemente ocurre en la infraestructura de GitHub en vez de en un entorno local.
+
+### Opción B — Local, en tu propio computador (si ya tienes Docker y Maven instalados)
+
+Requiere JDK 21, Maven 3.9+ y Docker.
+
+```bash
+chmod +x scripts/generar_evidencias.sh
+./scripts/generar_evidencias.sh
+```
+
+El script levanta PostgreSQL con `docker compose`, compila, ejecuta los 3 Jobs más la corrida
+de la rama alterna del decider, corre las consultas SQL de verificación, y deja todo
+ordenado y con timestamp en `evidencias/corrida-<fecha-hora>/`. Al final imprime en pantalla
+qué buscar en cada log (los hilos `Batch-Thread-`, las métricas de `RendimientoStepListener`,
+etc.).
+
+Si prefieres ejecutar los Jobs manualmente uno por uno:
+
+```bash
+docker compose up -d
+mvn clean package
+java -jar target/banco-xyz-batch-1.0.0.jar transacciones
+java -jar target/banco-xyz-batch-1.0.0.jar intereses
+java -jar target/banco-xyz-batch-1.0.0.jar cuentas-anuales
+# rama alterna del decider (dataset original, ~60% de registros invalidos en intereses.csv):
+java -jar target/banco-xyz-batch-1.0.0.jar intereses --batch.rutas.intereses=classpath:sample-data/intereses.csv
+# verificacion en base de datos:
+docker exec -it banco-xyz-postgres psql -U banco_xyz -d banco_xyz -c "SELECT * FROM resumen_transacciones_diarias;"
+```
+
+### Qué debe contener `evidencias/` al final
+
+La carpeta [`evidencias/`](evidencias/) debe quedar con, como mínimo: el log completo de
+cada uno de los 3 Jobs (desde `INICIO JOB` hasta `FIN JOB`, incluyendo el resumen de
+`RendimientoStepListener`), el log de la corrida que muestra la rama `REVISION_REQUERIDA`, el
+resultado de las consultas SQL de verificación, y —si usaste la Opción A— una captura de la
+ejecución en verde en la pestaña Actions de GitHub.
+
+## 10. Trazabilidad con la pauta de evaluación formativa
 
 | Criterio de la pauta | Dónde se implementa |
 |---|---|
@@ -275,12 +289,16 @@ git push -u origin main
 | Maneja errores y excepciones usando políticas y listeners | `RegistroInvalidoSkipPolicy`, `RegistroOmitidoListener`, `ConexionTransitoriaRetryPolicy` (sección 5) |
 | Implementa técnicas de logs para evaluar el rendimiento | `RendimientoStepListener`, `JobResumenListener`, patrón `[%thread]` (sección 7) |
 
-## 12. Nota sobre el entorno en que se preparó este proyecto
+## 11. Nota sobre el entorno en que se preparó este proyecto
 
-Este proyecto fue generado y revisado en un entorno sandbox sin acceso a Maven Central ni a
-un daemon Docker, por lo que **no pudo compilarse ni ejecutarse dentro de ese entorno**. Cada
-firma de API utilizada (Spring Batch 5.1.2 / Spring Retry, las versiones exactas que trae
-`spring-boot-starter-parent:3.3.4`) fue verificada línea por línea contra el código fuente
-oficial de esas librerías antes de escribirse aquí, pero se recomienda como primer paso
-ejecutar `mvn clean compile` en un entorno con acceso normal a internet y revisar la salida
+Este proyecto fue generado y revisado en un entorno sandbox cuya política de red bloquea
+explícitamente Maven Central (`repo.maven.apache.org` responde `403 Forbidden`) y Docker Hub
+(`registry-1.docker.io` responde `403 Forbidden`), aunque el propio daemon de Docker sí pudo
+iniciarse. En la práctica, eso significa que **no pudo compilarse ni ejecutarse dentro de ese
+entorno**: por eso se agregó el workflow de GitHub Actions de la sección 9 (Opción A), que
+corre en infraestructura con acceso normal a internet y es, hoy, la forma más directa de
+obtener una corrida real sin depender de un equipo local. Cada firma de API utilizada (Spring
+Batch 5.1.2 / Spring Retry, las versiones exactas que trae `spring-boot-starter-parent:3.3.4`)
+fue verificada línea por línea contra el código fuente oficial de esas librerías antes de
+escribirse aquí, pero se recomienda como primer paso revisar la salida de la Opción A o de
 antes de dar por definitiva la entrega.
