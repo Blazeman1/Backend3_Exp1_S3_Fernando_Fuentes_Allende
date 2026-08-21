@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: banco-xyz-batch
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/banco_xyz
+    username: banco_xyz
+    password: banco_xyz
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # Optimizacion de recursos del sistema: el pool de conexiones debe cubrir, como minimo,
+      # los 3 hilos de procesamiento paralelo (batch.hilos) mas un margen para el JobRepository
+      # y los Tasklets de resumen/agregacion que corren en el hilo principal. Se deja acotado
+      # a 8 para no agotar las conexiones disponibles del servidor de base de datos ni
+      # desperdiciar memoria en conexiones ociosas.
+      maximum-pool-size: 8
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+      pool-name: BancoXyzHikariPool
+
+  batch:
+    job:
+      # Deshabilitado a proposito: este proyecto expone 3 Jobs y se selecciona cual ejecutar
+      # desde la linea de comandos (ver BancoXyzBatchApplication). Si quedara en 'true', Spring
+      # Boot intentaria ejecutar TODOS los Jobs del contexto automaticamente al arrancar.
+      enabled: false
+    jdbc:
+      # Crea automaticamente las tablas de metadata de Spring Batch (BATCH_JOB_INSTANCE,
+      # BATCH_STEP_EXECUTION, etc.) la primera vez que se levanta la aplicacion. Estas tablas
+      # son las que permiten la re-ejecucion/reanudacion de un Job tras una falla.
+      initialize-schema: always
+
+  sql:
+    init:
+      # Ejecuta src/main/resources/schema.sql (tablas de negocio propias del Banco XYZ) al
+      # arrancar. Usa sentencias idempotentes (CREATE TABLE IF NOT EXISTS), por lo que es
+      # seguro dejarlo en 'always' incluso en ejecuciones repetidas.
+      mode: always
+
+# Parametros propios del proyecto (ver com.bancoxyz.batch.config.BatchProperties).
+# Pueden sobreescribirse por linea de comandos, por ejemplo:
+#   java -jar banco-xyz-batch.jar intereses --batch.rutas.intereses=classpath:sample-data/intereses.csv
+batch:
+  chunk-size: 5
+  hilos: 3
+  limite-omisiones: 200
+  maximo-reintentos: 3
+  umbral-calidad-porcentaje: 20.0
+  rutas:
+    transacciones: classpath:data/transacciones.csv
+    intereses: classpath:data/intereses.csv
+    cuentas-anuales: classpath:data/cuentas_anuales.csv
+
+logging:
+  pattern:
+    # Se incluye [%thread] deliberadamente: es lo que permite ver en la consola, durante la
+    # evidencia de ejecucion, como los 3 hilos "Batch-Thread-1/2/3" procesan chunks en paralelo.
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{45} - %msg%n"
+  level:
+    root: INFO
+    com.bancoxyz.batch: INFO
+    org.springframework.batch: INFO
+    org.springframework.jdbc.core: WARN

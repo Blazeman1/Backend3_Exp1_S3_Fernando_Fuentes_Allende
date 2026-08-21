@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: banco-xyz-postgres
+    environment:
+      POSTGRES_DB: banco_xyz
+      POSTGRES_USER: banco_xyz
+      POSTGRES_PASSWORD: banco_xyz
+    ports:
+      - "5432:5432"
+    volumes:
+      - banco_xyz_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U banco_xyz -d banco_xyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  banco_xyz_pgdata:
