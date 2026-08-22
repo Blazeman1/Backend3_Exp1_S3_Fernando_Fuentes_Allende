@@ -10,7 +10,6 @@ import org.springframework.batch.item.ItemProcessor;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Valida las cuentas de {@code intereses.csv} y calcula el interes mensual sobre cuentas de
@@ -27,19 +26,31 @@ import java.util.concurrent.ConcurrentHashMap;
  *       {@code -1} o vacio: fuera del alcance de este proceso).</li>
  *   <li>Edad vacia, no numerica o fuera del rango plausible 18-90.</li>
  *   <li>Saldo vacio, no numerico o negativo.</li>
- *   <li>Registro duplicado: mismo titular, saldo, edad y tipo ya visto en esta corrida
- *       (independientemente del numero de cuenta), replicando el problema de "registros
- *       duplicados" descrito en el dataset legacy.</li>
+ *   <li>Registro duplicado: mismo titular, saldo, edad y tipo ya visto, dado de alta bajo
+ *       otro numero de cuenta, replicando el problema de "registros duplicados" descrito en
+ *       el dataset legacy. A diferencia de las tres reglas anteriores, esta NO se valida en
+ *       este processor sino en la restriccion {@code UNIQUE uq_cuenta_interes_natural} de la
+ *       tabla {@code cuentas_interes}, que el writer viola con un
+ *       {@code DuplicateKeyException} (ver nota de evidencia real mas abajo).</li>
  * </ul>
  *
- * <p><b>Nota de diseno (thread-safety):</b> este processor se declara como bean singleton
- * (no {@code @StepScope}) para poder mantener, en {@link #firmasVistas}, un registro de las
- * combinaciones nombre+saldo+edad+tipo ya procesadas y detectar asi duplicados entre los 3
- * hilos del Step multithread. Se usa {@link ConcurrentHashMap#newKeySet()} porque es seguro
- * para escritura concurrente. Como contrapartida, el estado vive mientras viva el contexto de
- * Spring: en este proyecto no es un problema porque cada ejecucion de Job corresponde a un
- * proceso Java independiente (ver {@code BancoXyzBatchApplication}), pero en una aplicacion de
- * larga duracion esta deduplicacion deberia resolverse contra la base de datos.</p>
+ * <p><b>Nota de una corrida real (evidencia de GitHub Actions, 22-08-2026):</b> la primera
+ * version de este processor detectaba el duplicado logico con un {@code Set<String>} en
+ * memoria (campo de instancia de un bean singleton). Contra el dataset generado (300 filas,
+ * ~3% de duplicados reales,
+ * verificado programaticamente sobre el propio CSV) esa version reporto 171 omisiones
+ * (57%) en vez de las ~85 (28%) que corresponden a las reglas de validacion realmente
+ * aplicadas. La causa: cuando un chunk falla (falla cualquiera de sus items) y hay
+ * skip/retry configurados, Spring Batch reprocesa el chunk item por item ("scanning") para
+ * aislar cual item es el culpable - y eso vuelve a invocar {@code process()} sobre items que
+ * ya habian sido procesados (con exito) en el intento fallido anterior. Como el {@code Set}
+ * en memoria no participa de la transaccion JDBC, no se revierte cuando el chunk hace
+ * rollback: el reintento encuentra su propia firma ya agregada y se auto-reporta como
+ * "duplicado" de si mismo. La deteccion de duplicados se movio por eso a una restriccion
+ * {@code UNIQUE} en la tabla {@code cuentas_interes} ({@code uq_cuenta_interes_natural} en
+ * {@code schema.sql}), el mismo mecanismo -ya validado con evidencia real en Job 1- que si es
+ * seguro bajo reintentos: al vivir dentro de la transaccion del chunk, se revierte junto con
+ * ella, y un item valido reprocesado en el "scan" no encuentra ningun conflicto espurio.</p>
  */
 public class InteresItemProcessor implements ItemProcessor<CuentaInteresRaw, CuentaInteresProcesada> {
 
@@ -50,8 +61,6 @@ public class InteresItemProcessor implements ItemProcessor<CuentaInteresRaw, Cue
     private static final int EDAD_MAXIMA = 90;
     private static final BigDecimal TASA_AHORRO = new BigDecimal("0.0150");
     private static final BigDecimal TASA_PRESTAMO = new BigDecimal("0.0250");
-
-    private final Set<String> firmasVistas = ConcurrentHashMap.newKeySet();
 
     @Override
     public CuentaInteresProcesada process(CuentaInteresRaw raw) {
@@ -72,11 +81,11 @@ public class InteresItemProcessor implements ItemProcessor<CuentaInteresRaw, Cue
         }
 
         String nombre = raw.getNombre() == null ? "" : raw.getNombre().trim();
-        String firma = (nombre.toLowerCase() + "|" + saldo + "|" + edad + "|" + tipo);
-        if (!firmasVistas.add(firma)) {
-            throw new InvalidDataException("Cuenta " + raw.getCuentaId() +
-                    ": registro duplicado (mismo titular/saldo/edad/tipo ya procesado en esta corrida)");
-        }
+        // El duplicado logico (mismo titular/saldo/edad/tipo bajo otro cuenta_id) ya NO se
+        // detecta aqui: lo hace la restriccion UNIQUE uq_cuenta_interes_natural al escribir
+        // (ver nota de evidencia real en el javadoc de esta clase). El writer traduce esa
+        // violacion en un DuplicateKeyException, que la RegistroInvalidoSkipPolicy omite
+        // igual que cualquier otro registro invalido.
 
         BigDecimal tasa = tipo.equals("ahorro") ? TASA_AHORRO : TASA_PRESTAMO;
         BigDecimal interes = saldo.multiply(tasa).setScale(2, RoundingMode.HALF_UP);

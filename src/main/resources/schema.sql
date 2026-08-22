@@ -43,7 +43,14 @@ CREATE TABLE IF NOT EXISTS cuentas_interes (
     tasa_interes_mensual  NUMERIC(6,4) NOT NULL,
     interes_calculado     NUMERIC(15,2) NOT NULL,
     saldo_final           NUMERIC(15,2) NOT NULL,
-    fecha_procesamiento   TIMESTAMP NOT NULL DEFAULT now()
+    fecha_procesamiento   TIMESTAMP NOT NULL DEFAULT now(),
+    -- Restriccion de negocio (misma idea que uq_transaccion_natural en Job 1): detecta el
+    -- mismo titular/saldo/edad/tipo dado de alta bajo un cuenta_id distinto ("duplicado
+    -- logico" del dataset legacy). Se implementa como restriccion de BD -y no como chequeo
+    -- en memoria dentro del ItemProcessor- porque una restriccion de BD participa de la
+    -- transaccion del chunk: si el chunk se revierte, la deteccion se revierte con el (ver
+    -- nota de evidencia real en InteresItemProcessor).
+    CONSTRAINT uq_cuenta_interes_natural UNIQUE (nombre, saldo_inicial, edad, tipo)
 );
 
 -- ============================================================

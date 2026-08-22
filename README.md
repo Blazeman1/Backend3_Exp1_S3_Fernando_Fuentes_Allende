@@ -116,10 +116,17 @@ sospechoso, relevante para el reporte/auditoría) u **omitirse** (irrecuperable)
 **`InteresItemProcessor`**
 - Omite: tipo de cuenta fuera de alcance (`hipoteca`, `-1`, vacío — el requerimiento solo
   contempla `ahorro` y `préstamo`), edad vacía/no numérica/fuera de rango \[18-90\], saldo
-  vacío/no numérico/negativo, y registros duplicados (mismo titular+saldo+edad+tipo, aunque
-  el número de cuenta difiera).
+  vacío/no numérico/negativo.
 - Calcula: `ahorro` → 1.5% mensual, `préstamo` → 2.5% mensual sobre el saldo, actualizando
   `saldo_final` mediante **upsert** (`ON CONFLICT (cuenta_id) DO UPDATE`).
+- Los **duplicados lógicos** (mismo titular+saldo+edad+tipo bajo un número de cuenta
+  distinto) se detectan igual que en `TransaccionItemProcessor`: a nivel de base de datos
+  (restricción `UNIQUE uq_cuenta_interes_natural`), no en el processor. La primera versión
+  los detectaba con un `Set` en memoria dentro del processor; una corrida real en GitHub
+  Actions (22-08-2026) mostró que eso duplica falsos positivos bajo el "scanning" item por
+  item que Spring Batch aplica tras un chunk fallido (ver el javadoc de la clase para el
+  detalle) — se corrigió moviendo la detección a la base de datos, que sí participa de la
+  transacción del chunk y por lo tanto se revierte junto con él.
 
 **`MovimientoAnualItemProcessor`**
 - Corrige el formato de fecha legacy y rellena la descripción vacía con un valor por defecto.
