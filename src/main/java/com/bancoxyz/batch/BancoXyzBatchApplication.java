@@ -2,7 +2,9 @@ package com.bancoxyz.batch;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
@@ -10,12 +12,14 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Punto de entrada de la migracion batch del Banco XYZ (Exp1 - Semana 2).
@@ -37,14 +41,40 @@ import java.util.Map;
  * # corregir el archivo de origen luego de una falla), se puede fijar el runId manualmente:
  * java -jar banco-xyz-batch.jar transacciones --runId=2026-08-21-01
  * </pre>
+ *
+ * <p><b>Nota de una corrida real (evidencia de GitHub Actions, 22-08-2026):</b> el Job
+ * terminaba en estado {@code COMPLETED} (visible en el log) pero el proceso Java nunca
+ * devolvia el control al shell, dejando el step de CI "colgado" indefinidamente y sin poder
+ * avanzar al Job siguiente. La causa es el {@code ThreadPoolTaskExecutor} de
+ * {@code InfraestructuraBatchConfig}: con {@code corePoolSize == maxPoolSize == 3} y sin
+ * {@code allowCoreThreadTimeOut}, esos 3 hilos ("Batch-Thread-1/2/3") son NO-daemon y quedan
+ * vivos indefinidamente esperando la proxima tarea, incluso despues de que el
+ * {@code CommandLineRunner} termina. Como {@code main()} solo retorna de
+ * {@link SpringApplication#run} sin forzar el cierre de la JVM, esta nunca decide terminar
+ * mientras esos hilos sigan vivos. La solucion (patron oficial de Spring Boot para
+ * aplicaciones de linea de comandos) es cerrar el contexto explicitamente con
+ * {@link SpringApplication#exit} y forzar la salida con {@link System#exit}: eso dispara el
+ * apagado ordenado del executor (ya configurado con
+ * {@code waitForTasksToCompleteOnShutdown=true} y 30s de espera) y garantiza que la JVM
+ * termine con el codigo de salida correcto en vez de quedar colgada.</p>
  */
 @SpringBootApplication
 public class BancoXyzBatchApplication {
 
     private static final Logger log = LoggerFactory.getLogger(BancoXyzBatchApplication.class);
 
+    /**
+     * Codigo de salida del proceso, fijado por el {@link CommandLineRunner} segun el
+     * resultado real de los Jobs ejecutados. Se lee desde {@code main()} DESPUES de que
+     * {@link SpringApplication#run} retorna (los CommandLineRunner ya se ejecutaron para ese
+     * punto), por lo que no requiere sincronizacion adicional mas alla de la visibilidad que
+     * ya da {@link AtomicInteger}.
+     */
+    private static final AtomicInteger codigoSalida = new AtomicInteger(0);
+
     public static void main(String[] args) {
-        SpringApplication.run(BancoXyzBatchApplication.class, args);
+        ConfigurableApplicationContext contexto = SpringApplication.run(BancoXyzBatchApplication.class, args);
+        System.exit(SpringApplication.exit(contexto, codigoSalida::get));
     }
 
     @Bean
@@ -57,7 +87,7 @@ public class BancoXyzBatchApplication {
             if (argumentos.isEmpty()) {
                 log.error("Debe indicar que Job ejecutar: 'transacciones', 'intereses', 'cuentas-anuales' o 'todos'.");
                 log.error("Ejemplo: java -jar banco-xyz-batch.jar transacciones");
-                System.exit(1);
+                codigoSalida.set(1);
                 return;
             }
 
@@ -76,7 +106,9 @@ public class BancoXyzBatchApplication {
 
             if ("todos".equals(seleccion)) {
                 for (Map.Entry<String, Job> entry : jobsDisponibles.entrySet()) {
-                    ejecutar(jobLauncher, entry.getValue(), runId);
+                    if (!ejecutar(jobLauncher, entry.getValue(), runId)) {
+                        codigoSalida.set(1);
+                    }
                 }
                 return;
             }
@@ -84,18 +116,32 @@ public class BancoXyzBatchApplication {
             Job job = jobsDisponibles.get(seleccion);
             if (job == null) {
                 log.error("Job desconocido: '{}'. Opciones validas: {}, todos", seleccion, jobsDisponibles.keySet());
-                System.exit(1);
+                codigoSalida.set(1);
                 return;
             }
-            ejecutar(jobLauncher, job, runId);
+            if (!ejecutar(jobLauncher, job, runId)) {
+                codigoSalida.set(1);
+            }
         };
     }
 
-    private void ejecutar(JobLauncher jobLauncher, Job job, String runId) throws Exception {
+    /**
+     * Ejecuta un Job y devuelve {@code true} solo si termino en {@link BatchStatus#COMPLETED}.
+     * Antes de esta correccion el runner ignoraba el resultado de {@code jobLauncher.run(...)},
+     * asi que un Job que terminara en {@code FAILED} igual dejaba el proceso con exit code 0 -
+     * una CI "en verde" para una corrida que en realidad fallo.
+     */
+    private boolean ejecutar(JobLauncher jobLauncher, Job job, String runId) throws Exception {
         JobParameters parametros = new JobParametersBuilder()
                 .addString("fechaProceso", LocalDate.now().toString())
                 .addString("runId", runId)
                 .toJobParameters();
-        jobLauncher.run(job, parametros);
+        JobExecution ejecucion = jobLauncher.run(job, parametros);
+        boolean exitoso = ejecucion.getStatus() == BatchStatus.COMPLETED;
+        if (!exitoso) {
+            log.error("El Job [{}] termino con estado {} (exit status: {})",
+                    job.getName(), ejecucion.getStatus(), ejecucion.getExitStatus().getExitCode());
+        }
+        return exitoso;
     }
 }
