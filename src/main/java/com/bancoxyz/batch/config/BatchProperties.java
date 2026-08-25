@@ -18,6 +18,16 @@ public class BatchProperties {
     /** Numero de hilos de ejecucion paralela exigido por las instrucciones especificas: 3. */
     private int hilos = 3;
 
+    /**
+     * Semana 3: cantidad de particiones (grid size) para el modo particionado del Job de
+     * transacciones diarias. A diferencia de {@code hilos} (paralelismo dentro de un unico
+     * Step), este valor determina en cuantas ejecuciones de Step independientes se divide el
+     * archivo de transacciones. Configurable por linea de comandos
+     * ({@code --batch.grid-size=N}) para poder comparar distintas configuraciones (ver
+     * benchmark en GUIA_EJECUCION.md).
+     */
+    private int gridSize = 4;
+
     /** Cantidad maxima de registros que un Step puede omitir antes de fallar. */
     private long limiteOmisiones = 200;
 
@@ -43,6 +53,14 @@ public class BatchProperties {
 
     public void setHilos(int hilos) {
         this.hilos = hilos;
+    }
+
+    public int getGridSize() {
+        return gridSize;
+    }
+
+    public void setGridSize(int gridSize) {
+        this.gridSize = gridSize;
     }
 
     public long getLimiteOmisiones() {

@@ -17,6 +17,7 @@ import org.springframework.context.annotation.Bean;
 
 import java.time.LocalDate;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,6 +37,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * java -jar banco-xyz-batch.jar intereses
  * java -jar banco-xyz-batch.jar cuentas-anuales
  * java -jar banco-xyz-batch.jar todos
+ *
+ * # Semana 3: modo alternativo de escalamiento (particionado real) para el Job de
+ * # transacciones diarias. No forma parte de 'todos' a proposito, para no alterar la
+ * # evidencia ya validada del modo multi-hilo; se ejecuta explicitamente:
+ * java -jar banco-xyz-batch.jar transacciones-particionado
+ * java -jar banco-xyz-batch.jar transacciones-particionado --batch.grid-size=6
  *
  * # Para reintentar/re-ejecutar EXACTAMENTE la misma instancia de Job (por ejemplo, tras
  * # corregir el archivo de origen luego de una falla), se puede fijar el runId manualmente:
@@ -80,12 +87,13 @@ public class BancoXyzBatchApplication {
     @Bean
     public CommandLineRunner lanzadorDeJobs(JobLauncher jobLauncher,
                                              @Qualifier("transaccionesDiariasJob") Job transaccionesDiariasJob,
+                                             @Qualifier("transaccionesDiariasParticionadoJob") Job transaccionesDiariasParticionadoJob,
                                              @Qualifier("interesesMensualesJob") Job interesesMensualesJob,
                                              @Qualifier("estadosCuentaAnualesJob") Job estadosCuentaAnualesJob) {
         return args -> {
             List<String> argumentos = Arrays.asList(args);
             if (argumentos.isEmpty()) {
-                log.error("Debe indicar que Job ejecutar: 'transacciones', 'intereses', 'cuentas-anuales' o 'todos'.");
+                log.error("Debe indicar que Job ejecutar: 'transacciones', 'transacciones-particionado', 'intereses', 'cuentas-anuales' o 'todos'.");
                 log.error("Ejemplo: java -jar banco-xyz-batch.jar transacciones");
                 codigoSalida.set(1);
                 return;
@@ -98,14 +106,20 @@ public class BancoXyzBatchApplication {
                     .findFirst()
                     .orElse(String.valueOf(System.currentTimeMillis()));
 
-            Map<String, Job> jobsDisponibles = Map.of(
-                    "transacciones", transaccionesDiariasJob,
-                    "intereses", interesesMensualesJob,
-                    "cuentas-anuales", estadosCuentaAnualesJob
-            );
+            // 'todos' recorre unicamente los 3 Jobs base (linea de base multi-hilo), en el mismo
+            // orden que la evidencia de la Semana 2, para no alterar esa evidencia ya validada.
+            // El Job particionado (Semana 3) es un modo ALTERNATIVO y se invoca explicitamente
+            // por nombre, junto al resto de las corridas del benchmark comparativo.
+            Map<String, Job> jobsBase = new LinkedHashMap<>();
+            jobsBase.put("transacciones", transaccionesDiariasJob);
+            jobsBase.put("intereses", interesesMensualesJob);
+            jobsBase.put("cuentas-anuales", estadosCuentaAnualesJob);
+
+            Map<String, Job> jobsDisponibles = new LinkedHashMap<>(jobsBase);
+            jobsDisponibles.put("transacciones-particionado", transaccionesDiariasParticionadoJob);
 
             if ("todos".equals(seleccion)) {
-                for (Map.Entry<String, Job> entry : jobsDisponibles.entrySet()) {
+                for (Map.Entry<String, Job> entry : jobsBase.entrySet()) {
                     if (!ejecutar(jobLauncher, entry.getValue(), runId)) {
                         codigoSalida.set(1);
                     }

@@ -10,10 +10,12 @@ spring:
     hikari:
       # Optimizacion de recursos del sistema: el pool de conexiones debe cubrir, como minimo,
       # los 3 hilos de procesamiento paralelo (batch.hilos) mas un margen para el JobRepository
-      # y los Tasklets de resumen/agregacion que corren en el hilo principal. Se deja acotado
-      # a 8 para no agotar las conexiones disponibles del servidor de base de datos ni
-      # desperdiciar memoria en conexiones ociosas.
-      maximum-pool-size: 8
+      # y los Tasklets de resumen/agregacion que corren en el hilo principal. Desde la Semana 3
+      # tambien debe cubrir las particiones concurrentes del Job particionado (batch.grid-size,
+      # hasta 6 en el benchmark comparativo). Se deja en 12 -no mas- para no agotar las
+      # conexiones disponibles del servidor de base de datos ni desperdiciar memoria en
+      # conexiones ociosas.
+      maximum-pool-size: 12
       minimum-idle: 2
       connection-timeout: 30000
       idle-timeout: 300000
@@ -45,6 +47,10 @@ spring:
 batch:
   chunk-size: 5
   hilos: 3
+  # Semana 3: cantidad de particiones del Job particionado (transacciones-particionado).
+  # Sobreescribible por linea de comandos para el benchmark comparativo, por ejemplo:
+  #   java -jar banco-xyz-batch.jar transacciones-particionado --batch.grid-size=6
+  grid-size: 4
   limite-omisiones: 200
   maximo-reintentos: 3
   umbral-calidad-porcentaje: 20.0
