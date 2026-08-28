@@ -53,30 +53,37 @@ jobs:
       - name: Compilar el proyecto (mvn clean package)
         run: mvn -B clean package | tee evidencias-ci/evidencia-01-build.log
 
-      - name: Ejecutar Job 1 - Reporte de Transacciones Diarias
+      - name: Ejecutar Job 1 - Reporte de Transacciones Diarias (dataset oficial semana_3, ~21.5% de omision -> rama REVISION_REQUERIDA)
         continue-on-error: true
         run: |
           java -jar target/banco-xyz-batch-1.0.0.jar transacciones \
             | tee evidencias-ci/evidencia-02-job-transacciones.log
 
-      - name: Ejecutar Job 2 - Cálculo de Intereses Mensuales
+      - name: Ejecutar Job 2 - Cálculo de Intereses Mensuales (dataset oficial semana_3, ~83.6% de omision -> rama REVISION_REQUERIDA)
         continue-on-error: true
         run: |
           java -jar target/banco-xyz-batch-1.0.0.jar intereses \
             | tee evidencias-ci/evidencia-03-job-intereses.log
 
-      - name: Ejecutar Job 3 - Generación de Estados de Cuenta Anuales
+      - name: Ejecutar Job 3 - Generación de Estados de Cuenta Anuales (dataset oficial semana_3, ~6% de omision -> rama CALIDAD_OK)
         continue-on-error: true
         run: |
           java -jar target/banco-xyz-batch-1.0.0.jar cuentas-anuales \
             | tee evidencias-ci/evidencia-04-job-cuentas-anuales.log
 
-      - name: Ejecutar Job 2 contra el dataset original (rama REVISION_REQUERIDA del decider)
+      - name: Ejecutar Job 1 contra un subconjunto curado sin filas invalidas (rama CALIDAD_OK del decider)
+        continue-on-error: true
+        run: |
+          java -jar target/banco-xyz-batch-1.0.0.jar transacciones \
+            --batch.rutas.transacciones=classpath:sample-data/transacciones.csv \
+            | tee evidencias-ci/evidencia-05-job-transacciones-sample-data.log
+
+      - name: Ejecutar Job 2 contra un subconjunto curado sin filas invalidas (rama CALIDAD_OK del decider)
         continue-on-error: true
         run: |
           java -jar target/banco-xyz-batch-1.0.0.jar intereses \
             --batch.rutas.intereses=classpath:sample-data/intereses.csv \
-            | tee evidencias-ci/evidencia-05-job-intereses-sample-data.log
+            | tee evidencias-ci/evidencia-06-job-intereses-sample-data.log
 
       - name: Verificar resultados en PostgreSQL
         continue-on-error: true
@@ -96,7 +103,7 @@ jobs:
             echo
             echo "=== conteo de anomalias detectadas por Job 1 ==="
             psql -h localhost -U banco_xyz -d banco_xyz -c "SELECT es_anomalia, COUNT(*) FROM transacciones_procesadas GROUP BY es_anomalia;"
-          } | tee evidencias-ci/evidencia-06-consultas-sql.log
+          } | tee evidencias-ci/evidencia-07-consultas-sql.log
 
       - name: Publicar evidencias como artefacto descargable
         if: always()

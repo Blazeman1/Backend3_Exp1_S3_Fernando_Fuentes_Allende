@@ -42,7 +42,8 @@ PostgreSQL real en segundo plano — no necesitas hacer nada más en tu terminal
 1. Entra a tu repositorio en github.com.
 2. Ve a la pestaña **Actions** (en la barra superior del repo).
 3. Verás **dos** workflows disparados por el mismo push:
-   - **"Evidencia de ejecución - Banco XYZ Batch"** (semanas 1-2, sin cambios): 2-3 minutos.
+   - **"Evidencia de ejecución - Banco XYZ Batch"** (misma estructura de pasos heredada de las
+     semanas 1-2, corriendo ahora contra el dataset oficial de la semana 3): 2-4 minutos.
    - **"Evidencia S3 - Particionado y Benchmark"** (nuevo): 4-6 minutos, porque además del
      Job particionado corre el benchmark comparativo (múltiples invocaciones del JAR variando
      hilos, chunk-size y grid-size).
@@ -54,9 +55,11 @@ PostgreSQL real en segundo plano — no necesitas hacer nada más en tu terminal
 1. Cuando cada run termine (ícono verde ✓), baja hasta el final de esa página.
 2. En la sección **Artifacts** de cada uno, descarga `evidencia-ejecucion-banco-xyz.zip` y
    `evidencia-ejecucion-s3-benchmark.zip` respectivamente.
-3. Descomprime ambos: el primero trae 6 archivos `.log` (`evidencia-01-build.log` hasta
-   `evidencia-06-consultas-sql.log`); el segundo trae los logs del Job particionado y del
-   benchmark (`evidencia-01-build.log` hasta `evidencia-06-resumen-benchmark.log`).
+3. Descomprime ambos: el primero trae 7 archivos `.log` (`evidencia-01-build.log` hasta
+   `evidencia-07-consultas-sql.log`, incluyendo las dos corridas contra `sample-data/` que
+   muestran la rama `CALIDAD_OK` en transacciones e intereses); el segundo trae los logs del
+   Job particionado y del benchmark (`evidencia-01-build.log` hasta
+   `evidencia-06-resumen-benchmark.log`).
 4. Mueve todos esos archivos a la carpeta `evidencias/` del proyecto.
 5. Toma una captura de pantalla de cada página de Actions en verde y guárdala también en
    `evidencias/`.
@@ -92,19 +95,22 @@ FIN JOB [transaccionesDiariasParticionadoJob] - estado=COMPLETED | duracion=<N4>
 
 Para completar la conclusión con datos reales: copia aquí, en esta misma sección, la tabla de
 duraciones obtenida en TU corrida real de GitHub Actions, y marca cuál configuración resultó
-más rápida para las 600 filas del dataset ampliado. Como referencia de qué esperar (a
+más rápida para las 1000 filas del dataset oficial de la semana 3 (nota: el benchmark corre
+sobre `transacciones.csv` con el `ItemProcessor` real, por lo que el 21.5% de omisión del
+dataset oficial -sección 1.1- también aplica aquí; no afecta la comparación porque todas las
+configuraciones del benchmark procesan el mismo archivo). Como referencia de qué esperar (a
 confirmar con la corrida real, no asumir sin verificar):
 
 | Configuración | Job | Qué se espera observar |
 |---|---|---|
 | `hilos=1` (secuencial) | multi-hilo | Debería ser la más lenta de las variantes de hilos: sin paralelismo, pero también sin overhead de coordinación entre hilos |
 | `hilos=3` (línea base exigida) | multi-hilo | Debería mejorar sobre `hilos=1`; es el mínimo exigido por las instrucciones específicas |
-| `hilos=6` | multi-hilo | Con solo 600 filas y chunk=5 (120 chunks), más hilos que trabajo disponible puede no mejorar sobre `hilos=3`, o incluso empeorar por overhead de coordinación/contención de conexiones |
+| `hilos=6` | multi-hilo | Con 1000 filas y chunk=5 (200 chunks), más hilos que trabajo disponible puede no mejorar sobre `hilos=3`, o incluso empeorar por overhead de coordinación/contención de conexiones |
 | `chunk-size` pequeño (1) vs. grande (50) | multi-hilo | Chunks muy pequeños multiplican los commits (overhead de transacción); chunks muy grandes reducen el paralelismo real percibido y agrandan el radio de una eventual falla/reintento |
-| `grid-size` 1, 2, 4, 6 | particionado | Cada partición abre su propio archivo y su propia conexión: para un archivo de 600 filas, el overhead de abrir N streams puede pesar más que el procesamiento en sí a partir de cierto `grid-size` — la corrida real debe mostrar en qué punto deja de compensar |
+| `grid-size` 1, 2, 4, 6 | particionado | Cada partición abre su propio archivo y su propia conexión: para un archivo de 1000 filas, el overhead de abrir N streams puede pesar más que el procesamiento en sí a partir de cierto `grid-size` — la corrida real debe mostrar en qué punto deja de compensar |
 
 **Conclusión (completar con los números reales de tu corrida):** la configuración óptima
-para este volumen de datos (600 filas) es `______`, porque `______`. Para un volumen de datos
+para este volumen de datos (1000 filas) es `______`, porque `______`. Para un volumen de datos
 significativamente mayor (por ejemplo, miles o millones de filas, como sería el caso real de
 transacciones diarias de un banco), se esperaría que el paralelismo (por hilos o por
 particiones) compense de forma más clara el overhead de coordinación — este benchmark
@@ -132,10 +138,12 @@ chmod +x scripts/generar_evidencias.sh
 ```
 
 El script hace, en orden: levanta PostgreSQL con `docker compose`, espera a que esté
-saludable, compila con Maven, corre los 3 Jobs, corre una cuarta vez el Job de intereses
-contra el dataset original (para mostrar la rama `REVISION_REQUERIDA` del decider), y ejecuta
-4 consultas SQL de verificación. Todo queda guardado con timestamp en
-`evidencias/corrida-<fecha-hora>/`.
+saludable, compila con Maven, corre los 3 Jobs contra el dataset oficial completo
+(transacciones e intereses derivan a `REVISION_REQUERIDA` por su tasa de error real; cuentas
+anuales completa el flujo normal), corre una cuarta y quinta vez transacciones e intereses
+contra el subconjunto curado de `sample-data/` (para mostrar la rama `CALIDAD_OK` también en
+esos dos Jobs), y ejecuta 4 consultas SQL de verificación. Todo queda guardado con timestamp
+en `evidencias/corrida-<fecha-hora>/`.
 
 Para el Job particionado y el benchmark comparativo de la semana 3 (con PostgreSQL ya
 levantado y el proyecto ya compilado por el paso anterior):
@@ -157,7 +165,9 @@ java -jar target/banco-xyz-batch-1.0.0.jar transacciones
 java -jar target/banco-xyz-batch-1.0.0.jar intereses
 java -jar target/banco-xyz-batch-1.0.0.jar cuentas-anuales
 
-# rama alterna del decider (dataset original, ~60% de registros invalidos):
+# rama CALIDAD_OK del decider, con el subconjunto curado (0% de omision por diseno):
+java -jar target/banco-xyz-batch-1.0.0.jar transacciones \
+  --batch.rutas.transacciones=classpath:sample-data/transacciones.csv
 java -jar target/banco-xyz-batch-1.0.0.jar intereses \
   --batch.rutas.intereses=classpath:sample-data/intereses.csv
 
@@ -183,10 +193,10 @@ y toma una captura de pantalla de al menos una corrida completa mostrando los hi
 | Archivo / captura | Qué demuestra |
 |---|---|
 | Log del build (`mvn clean package` exitoso) | El proyecto compila |
-| Log de `transaccionesDiariasJob` | Chunks + 3 hilos + resumen de anomalías |
-| Log de `interesesMensualesJob` | Cálculo de intereses + upsert |
-| Log de `estadosCuentaAnualesJob` | Agregación anual por cuenta |
-| Log de la corrida con `sample-data/intereses.csv` | Rama `REVISION_REQUERIDA` del decider |
+| Log de `transaccionesDiariasJob` (dataset oficial) | Chunks + 3 hilos + rama `REVISION_REQUERIDA` (21.5% de omisión real) |
+| Log de `interesesMensualesJob` (dataset oficial) | Cálculo de intereses + upsert + rama `REVISION_REQUERIDA` (83.6% de omisión real) |
+| Log de `estadosCuentaAnualesJob` (dataset oficial) | Agregación anual por cuenta + rama `CALIDAD_OK` (6% de omisión real) |
+| Logs de las corridas con `sample-data/transacciones.csv` y `sample-data/intereses.csv` | Rama `CALIDAD_OK` del decider, también para esos dos Jobs |
 | Log o captura de las consultas SQL | Los datos realmente quedaron en PostgreSQL |
 | Captura de la pestaña Actions en verde (Ruta A, ambos workflows) | Evidencia reproducible, visible para cualquiera |
 | Log de `transaccionesDiariasParticionadoJob` | Particionado real (`Particion-Thread-`) funcionando |
@@ -200,9 +210,11 @@ y toma una captura de pantalla de al menos una corrida completa mostrando los hi
   actuando (criterio "maneja errores y excepciones").
 - La línea `<== Fin Step [...] ... throughput=... items/seg` de `RendimientoStepListener`:
   las métricas de rendimiento (criterio "logs para evaluar el rendimiento").
-- En la corrida contra `sample-data/`, la línea
-  `Porcentaje de omision (...) supera el umbral` seguida de `REVISION_REQUERIDA`: el
-  `JobExecutionDecider` en acción (criterio "políticas de finalización y re-ejecución").
+- En las corridas contra el dataset oficial (transacciones e intereses), la línea
+  `Porcentaje de omision (...) supera el umbral` seguida de `REVISION_REQUERIDA`; en las
+  corridas contra `sample-data/` (subconjunto curado) y en `estadosCuentaAnualesJob`, la
+  misma línea pero con `CALIDAD_OK`: el `JobExecutionDecider` mostrando ambas ramas con datos
+  reales (criterio "políticas de finalización y re-ejecución").
 - **`[Particion-Thread-0]`, `[Particion-Thread-1]`, ...** intercalados en el log del Job
   particionado: varias particiones procesando rangos disjuntos del archivo al mismo tiempo
   (criterio 4 de la pauta S3, técnica de escalado alternativa).

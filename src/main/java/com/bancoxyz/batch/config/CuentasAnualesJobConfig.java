@@ -50,6 +50,11 @@ public class CuentasAnualesJobConfig {
         return new FlatFileItemReaderBuilder<MovimientoAnualRaw>()
                 .name("cuentasAnualesFlatFileReader")
                 .resource(resource)
+                // UTF-8 explicito: el dataset oficial de la semana 3 trae el tipo de movimiento
+                // "depósito" con tilde (ver MovimientoAnualItemProcessor), y dejar el encoding
+                // librado al default de la plataforma es justamente el tipo de bug silencioso
+                // que solo aparece al ejecutar en otra maquina/CI.
+                .encoding("UTF-8")
                 .linesToSkip(1)
                 .delimited()
                 .names("cuentaId", "fecha", "transaccion", "monto", "descripcion")

@@ -51,7 +51,12 @@ batch:
   # Sobreescribible por linea de comandos para el benchmark comparativo, por ejemplo:
   #   java -jar banco-xyz-batch.jar transacciones-particionado --batch.grid-size=6
   grid-size: 4
-  limite-omisiones: 200
+  # Circuito de seguridad, no el umbral de calidad (eso lo hace ControlCalidadDecider por
+  # porcentaje). Se deja en 900 porque, verificado programaticamente contra el dataset OFICIAL
+  # de la semana 3 (1000 filas por archivo), el peor caso real (intereses.csv) omite hasta 836
+  # filas (83.6%, cuentas hipoteca/tipo invalido fuera del alcance de este proceso) - un valor
+  # bajo haria fallar el Step antes de que el decider evalue el porcentaje real.
+  limite-omisiones: 900
   maximo-reintentos: 3
   umbral-calidad-porcentaje: 20.0
   rutas:

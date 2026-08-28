@@ -14,11 +14,14 @@ semana 3: modernizar tres procesos batch legacy del **Banco XYZ** utilizando
 además políticas de escalamiento adicionales (particionado real, sección 4) evaluadas
 mediante un benchmark comparativo, para "encontrar la configuración óptima" del sistema.
 
-> **Nota sobre continuidad:** todo lo descrito en las secciones 1-3 y 5-7 (arquitectura de
-> los 3 Jobs, reglas de negocio, tolerancia a fallos, optimización de recursos y logs de
-> rendimiento) proviene de las actividades formativas previas y ya fue validado con
-> evidencia real de ejecución; se mantiene sin cambios de diseño. Lo nuevo de la semana 3
-> es exclusivamente el modo de particionado y el benchmark comparativo de la sección 4.
+> **Nota sobre continuidad:** la arquitectura de los 3 Jobs (Steps, listeners, políticas de
+> skip/retry, decider de calidad) proviene de las actividades formativas previas y se
+> mantiene sin cambios de diseño. Lo nuevo de la semana 3 es el modo de particionado y el
+> benchmark comparativo (sección 4), **y el cambio de dataset de origen**: esta actividad usa
+> el dataset OFICIAL de `data/semana_3` (no el de `semana_2`, mucho más pequeño y con menos
+> variedad de errores), lo que además obligó a corregir/ampliar dos reglas de negocio que
+> asumían un dataset más simple (parser de fechas y normalización de tipos de movimiento —
+> ver sección 1.1 y 3).
 
 Se implementan tres Jobs independientes, cada uno versionado como parte del mismo
 proyecto Maven:
@@ -29,52 +32,78 @@ proyecto Maven:
 | **`interesesMensualesJob`** | Cálculo de Intereses Mensuales: aplica intereses sobre cuentas de ahorro y préstamo, y actualiza el saldo final. | `data/intereses.csv` | `cuentas_interes` |
 | **`estadosCuentaAnualesJob`** | Generación de Estados de Cuenta Anuales: compila el historial anual por cuenta en un informe para auditorías. | `data/cuentas_anuales.csv` | `cuentas_anuales_movimientos`, `estados_cuenta_anuales` |
 
-Los datos de origen se basan en el repositorio oficial de la actividad
-[`KariVillagran/bank_legacy_data`](https://github.com/KariVillagran/bank_legacy_data)
-(carpeta `data/semana_2`). El dataset oficial trae únicamente 8-10 filas por archivo —
-suficiente para probar la lógica, pero no para demostrar de forma convincente el
-procesamiento en chunks y multithreading que exige la actividad. Por eso:
+### 1.1 Datos de origen (dataset oficial de la semana 3)
 
-- Los **3 CSV originales, sin modificar**, se conservan en `src/main/resources/sample-data/`.
-- Se generó, con `scripts/generar_datos.py`, una **versión ampliada** (600-900 filas por
-  archivo) que respeta exactamente los mismos problemas de calidad de datos descritos en el
-  README del repositorio legacy (montos negativos/cero/vacíos, fechas en dos formatos,
-  edades fuera de rango, tipos inválidos, registros duplicados, descripciones faltantes).
-  Esta es la que usan los Jobs **por defecto**, en `src/main/resources/data/`.
-- Ambas rutas son intercambiables por configuración (ver sección 8).
+Los datos de origen son el dataset **oficial** de esta actividad:
+[`KariVillagran/bank_legacy_data`](https://github.com/KariVillagran/bank_legacy_data),
+carpeta [`data/semana_3`](https://github.com/KariVillagran/bank_legacy_data/tree/main/data/semana_3)
+— **no** el de `data/semana_2` que se usó en las actividades formativas previas. A diferencia
+de aquel (8-10 filas por archivo), este trae **1000 filas por archivo**, ya suficientes por sí
+solas para evidenciar de forma convincente chunks, multithreading y particionado, sin
+necesidad de generar datos sintéticos adicionales.
+
+Los 3 CSV oficiales, **sin modificar**, se copiaron tal cual a `src/main/resources/data/` (la
+ruta que usan los Jobs por defecto). Se verificó programáticamente (no a simple vista) qué
+problemas de calidad trae realmente este dataset, porque difieren en variedad de los
+descritos para `semana_2`:
+
+| Archivo | Problemas de datos verificados (sobre 1000 filas) |
+|---|---|
+| `transacciones.csv` | Fechas en **4 formatos** distintos: `yyyy-MM-dd` (294), `yyyy/MM/dd` (222), `dd-MM-yyyy` (250) y `dd/MM/yyyy` (234); 55 fechas estructuralmente válidas pero con mes inexistente (p. ej. `2024-13-01`); montos vacíos (168) o no numéricos; montos negativos/cero (154, se conservan como anomalía); tipos `desconocido`/`invalid` además de `credito`/`debito` (294, se conservan como anomalía) |
+| `intereses.csv` | Tipos de cuenta `ahorro` (219), `prestamo` (226) -los dos que exige la actividad-, más `hipoteca` (224, fuera del alcance del cálculo de intereses de esta actividad), `-1` (279) y `unknown` (52) como valores centinela de dato inválido; edades vacías o fuera de rango \[18-90\] (171); saldos vacíos o negativos (55); 55 registros con la misma combinación (nombre, saldo, edad, tipo) bajo otro `cuenta_id` (duplicado lógico) |
+| `cuentas_anuales.csv` | Fechas en los mismos 4 formatos; tipo de movimiento `compra`/`retiro`/`deposito`, más `pago` (42, tratado igual que `retiro`/`compra`: dinero que sale de la cuenta) y **`depósito` con tilde** (52 filas — la ortografía correcta en español; se normaliza el acento en vez de descartarla); montos en cero o no numéricos (60); 485-523 filas con signo de monto inconsistente con el tipo de movimiento (se corrige automáticamente, ver sección 3) |
+
+Esto llevó a corregir dos componentes que asumían un dataset más simple (el de `semana_2`,
+con solo 2 formatos de fecha y sin la variante acentuada): `FechaFlexibleParser` (ahora
+soporta los 4 formatos reales) y `MovimientoAnualItemProcessor` (ahora acepta `pago` y
+normaliza acentos antes de comparar el tipo de movimiento) — ver sección 3.
+
+Adicionalmente, en `src/main/resources/sample-data/` se dejaron **subconjuntos curados**
+(filtrados programáticamente desde el propio dataset oficial, sin inventar ni modificar
+ningún valor) que no contienen ninguna fila que dispare un `skip`, usados para demostrar
+puntualmente la rama `CALIDAD_OK` del `ControlCalidadDecider` en Jobs cuyo dataset oficial
+completo cae en la rama `REVISION_REQUERIDA` (ver sección 9). Ambas rutas son
+intercambiables por configuración (`--batch.rutas.<job>=classpath:sample-data/<archivo>.csv`).
+
+> `scripts/generar_datos.py` (generador de datos sintéticos usado en las semanas 1-2, cuando
+> el dataset oficial de esa época solo traía 8-10 filas) queda como referencia histórica y ya
+> no forma parte del flujo por defecto: el dataset oficial de `semana_3` no lo necesita.
 
 ## 2. Arquitectura del proyecto
 
 ```
 banco-xyz-batch/
 ├── .github/workflows/
-│   └── evidencia-ejecucion.yml     # CI: compila y corre los 3 Jobs, publica los logs como artefacto
+│   ├── evidencia-ejecucion.yml     # CI: compila y corre los 3 Jobs (dataset oficial + subconjunto curado)
+│   └── evidencia-ejecucion-s3.yml  # CI: Job particionado + benchmark comparativo (semana 3)
 ├── docker-compose.yml              # PostgreSQL para desarrollo local
 ├── pom.xml
 ├── evidencias/                     # Destino de los logs/capturas de la corrida real (sección 9)
 ├── scripts/
-│   ├── generar_datos.py            # Generador del dataset ampliado (reproducible, seed fija)
+│   ├── generar_datos.py            # (Historico S1-S2) generador del dataset sintetico ampliado
 │   └── generar_evidencias.sh       # Automatiza la corrida local completa (Opción B, sección 9)
 ├── src/main/resources/
 │   ├── application.yml
 │   ├── schema.sql                  # Tablas de negocio (metadata de Spring Batch se autogenera)
-│   ├── data/                       # CSV ampliados (usados por defecto)
-│   └── sample-data/                # CSV originales del repo bank_legacy_data (sin modificar)
+│   ├── data/                       # CSV oficiales de data/semana_3 (usados por defecto)
+│   └── sample-data/                # Subconjuntos curados (sin filas invalidas) del mismo dataset oficial
 └── src/main/java/com/bancoxyz/batch/
     ├── BancoXyzBatchApplication.java   # Punto de entrada + selector de Job por CLI
     ├── config/                          # Configuración de los 3 Jobs + infraestructura común
     │   ├── BatchProperties.java             # chunk-size, hilos, límites, rutas (externalizados)
     │   ├── InfraestructuraBatchConfig.java   # TaskExecutor (3 hilos) y JdbcTemplate
     │   ├── TransaccionesJobConfig.java
+    │   ├── TransaccionesParticionadoJobConfig.java  # Job particionado (semana 3, sección 4.2)
     │   ├── InteresesJobConfig.java
     │   └── CuentasAnualesJobConfig.java
     ├── model/                            # POJOs "raw" (CSV) y "procesados" (BD)
     ├── processor/                        # ItemProcessor: valida, corrige u omite
     ├── policy/                           # SkipPolicy y RetryPolicy personalizadas
     ├── listener/                         # Listeners de Job/Step/Skip + JobExecutionDecider
+    ├── partition/                        # TransaccionesRangoPartitioner (semana 3, sección 4.2)
     ├── tasklet/                          # Tasklets: purga, resumen, agregación, revisión
     ├── exception/                        # InvalidDataException
-    └── util/                             # FechaFlexibleParser (yyyy-MM-dd / yyyy/MM/dd)
+    └── util/                             # FechaFlexibleParser (4 formatos: ver seccion 1.1)
 ```
 
 ### Flujo de cada Job
@@ -114,16 +143,23 @@ Cada `ItemProcessor` decide, registro por registro, si el dato debe **corregirse
 sospechoso, relevante para el reporte/auditoría) u **omitirse** (irrecuperable):
 
 **`TransaccionItemProcessor`**
-- Corrige el formato de fecha legacy (`yyyy/MM/dd` → `yyyy-MM-dd`).
-- Conserva y marca como anomalía: monto negativo, monto en cero, tipo no reconocido.
-- Omite (skip): monto vacío o no numérico, fecha imposible de interpretar.
+- Corrige el formato de fecha: `FechaFlexibleParser` prueba, en orden, `yyyy-MM-dd`,
+  `yyyy/MM/dd`, `dd-MM-yyyy` y `dd/MM/yyyy` — los 4 formatos verificados en el dataset oficial
+  de la semana 3 (ver sección 1.1); verificado además con un caso de prueba en Java puro
+  (JDK 21) que confirma que no hay ambigüedad entre formatos (p. ej. `01-01-2024` nunca se
+  malinterpreta como año-mes-día).
+- Conserva y marca como anomalía: monto negativo, monto en cero, tipo no reconocido
+  (`desconocido`, `invalid`, o cualquier valor fuera de `DEBITO`/`CREDITO`).
+- Omite (skip): monto vacío o no numérico, fecha imposible de interpretar (estructuralmente
+  válida pero con mes/día inexistente, p. ej. `2024-13-01`, presente en el dataset real).
 - Los **duplicados exactos** (misma fecha+monto+tipo) se detectan a nivel de base de datos
   (restricción `UNIQUE`) y se omiten en la escritura — ver `RegistroInvalidoSkipPolicy`.
 
 **`InteresItemProcessor`**
-- Omite: tipo de cuenta fuera de alcance (`hipoteca`, `-1`, vacío — el requerimiento solo
-  contempla `ahorro` y `préstamo`), edad vacía/no numérica/fuera de rango \[18-90\], saldo
-  vacío/no numérico/negativo.
+- Omite: tipo de cuenta fuera de alcance (`hipoteca`, `-1`, `unknown`, vacío — el
+  requerimiento solo contempla `ahorro` y `préstamo`; en el dataset oficial esto por sí solo
+  representa el 55.5% de las filas, ver sección 1.1), edad vacía/no numérica/fuera de rango
+  \[18-90\], saldo vacío/no numérico/negativo.
 - Calcula: `ahorro` → 1.5% mensual, `préstamo` → 2.5% mensual sobre el saldo, actualizando
   `saldo_final` mediante **upsert** (`ON CONFLICT (cuenta_id) DO UPDATE`).
 - Los **duplicados lógicos** (mismo titular+saldo+edad+tipo bajo un número de cuenta
@@ -136,11 +172,21 @@ sospechoso, relevante para el reporte/auditoría) u **omitirse** (irrecuperable)
   transacción del chunk y por lo tanto se revierte junto con él.
 
 **`MovimientoAnualItemProcessor`**
-- Corrige el formato de fecha legacy y rellena la descripción vacía con un valor por defecto.
+- Corrige el formato de fecha (los mismos 4 formatos que `TransaccionItemProcessor`) y
+  rellena la descripción vacía con un valor por defecto.
+- **Corrige** (no descarta) el tipo de movimiento `depósito` con tilde, normalizando el
+  acento antes de compararlo contra `deposito` — verificado con un caso de prueba en Java
+  puro que confirma que `Normalizer.normalize(..., NFD)` + eliminar marcas de combinación
+  hace que ambas cadenas se comparen como iguales. Sin esta corrección, el 5.2% de las filas
+  del dataset oficial (la ortografía correcta en español) se habría descartado por error.
+- Acepta `pago` como tipo de movimiento válido, tratado igual que `retiro`/`compra` (dinero
+  que sale de la cuenta) — el dataset oficial lo usa en el 4.2% de las filas y no hay
+  ninguna razón de negocio para excluirlo.
 - Corrige automáticamente el signo del monto cuando es inconsistente con el tipo de
-  movimiento (un depósito no puede ser negativo; un retiro/compra no puede ser positivo) y
-  deja la anomalía registrada para auditoría.
-- Omite: tipo de movimiento no reconocido, monto vacío/no numérico/en cero.
+  movimiento (un depósito no puede ser negativo; un retiro/compra/pago no puede ser positivo)
+  y deja la anomalía registrada para auditoría.
+- Omite: tipo de movimiento no reconocido (tras normalizar el acento), monto vacío/no
+  numérico/en cero.
 
 ## 4. Escalado y procesamiento paralelo
 
@@ -210,7 +256,7 @@ del modo multi-hilo; se ejecuta explícitamente por su propio nombre.
 ### 4.3 Benchmark comparativo: encontrando la configuración óptima
 
 Para cumplir el criterio *"comparando diferentes parámetros para encontrar la configuración
-óptima"*, se ejecutó el mismo dataset (`transacciones.csv`, 600 filas de datos) bajo
+óptima"*, se ejecutó el mismo dataset (`transacciones.csv`, 1000 filas de datos (dataset oficial semana_3)) bajo
 distintas configuraciones, usando en cada caso el `duracion={} ms` que
 `JobResumenListener` imprime al finalizar el Job (tiempo total de punta a punta, incluyendo
 purga, carga y resumen/revisión) como métrica de comparación:
@@ -229,7 +275,7 @@ y sus resultados numéricos quedan documentados en
 resume ahí mismo, junto con la configuración recomendada como "óptima" para este volumen de
 datos y por qué.
 
-> Nota de diseño: con un dataset de 600 filas, tanto el paralelismo por hilos como por
+> Nota de diseño: con un dataset de 1000 filas, tanto el paralelismo por hilos como por
 > particiones tienen overhead de arranque (creación de hilos, apertura de N streams de
 > archivo) comparable o mayor al tiempo de procesamiento en sí — por eso el benchmark es
 > justamente lo que permite decidir con evidencia, y no por intuición, si conviene escalar
@@ -242,14 +288,24 @@ datos y por qué.
   omiten (`InvalidDataException`, `FlatFileParseException`, `DataIntegrityViolationException`
   por duplicados) y cuáles no (p. ej. una caída de conexión a la base de datos, que debe
   fallar el Step), respetando un límite máximo configurable de omisiones
-  (`batch.limite-omisiones`).
+  (`batch.limite-omisiones`, **900** por defecto). Este límite es un circuito de seguridad
+  contra pérdida silenciosa de datos, no el criterio de calidad en sí (ese lo evalúa el
+  `ControlCalidadDecider`, por porcentaje) — se fijó en 900 tras verificar programáticamente
+  la tasa de omisión real del peor caso del dataset oficial (`intereses.csv`, 83.6%, ver
+  sección 1.1): con el valor de 200 usado en la semana 2 (pensado para un dataset de 300-900
+  filas), el Step habría fallado abruptamente antes de terminar de leer el archivo.
 - **`ConexionTransitoriaRetryPolicy`** (`RetryPolicy` personalizada, extiende
   `SimpleRetryPolicy`): reintenta únicamente fallas transitorias de infraestructura
   (`TransientDataAccessException`, `SQLTransientException`, `QueryTimeoutException`), hasta
   `batch.maximo-reintentos` intentos, dejando cada intento registrado en el log.
 - **`ControlCalidadDecider`** (`JobExecutionDecider`): política de finalización que deriva el
   flujo del Job según el porcentaje de registros omitidos (`batch.umbral-calidad-porcentaje`,
-  20% por defecto).
+  20% por defecto). Contra el dataset oficial de la semana 3 esto se demuestra con datos
+  reales, sin necesidad de un dataset alterno: `transaccionesDiariasJob` (21.5% de omisión) e
+  `interesesMensualesJob` (83.6%) derivan a `REVISION_REQUERIDA`, mientras que
+  `estadosCuentaAnualesJob` (6.0%) completa el flujo normal (`CALIDAD_OK`) — y, para los dos
+  primeros, `sample-data/` provee además un subconjunto curado que sí llega a `CALIDAD_OK`,
+  demostrando ambas ramas para todos los Jobs (ver sección 9).
 - **Re-ejecución**: el `JobRepository` (tablas `BATCH_JOB_*`, autogeneradas por
   `spring.batch.jdbc.initialize-schema=always`) persiste el estado de cada ejecución. Para
   reintentar la misma instancia de Job (por ejemplo, tras corregir el archivo de origen) se
@@ -265,9 +321,10 @@ datos y por qué.
 
 ## 6. Optimización de recursos del sistema
 
-- **Pool de conexiones (HikariCP)**: `maximum-pool-size: 8`, dimensionado para cubrir los 3
-  hilos de procesamiento paralelo más margen para el `JobRepository` y los Tasklets de
-  resumen, sin sobredimensionar y agotar conexiones del servidor.
+- **Pool de conexiones (HikariCP)**: `maximum-pool-size: 12`, dimensionado para cubrir los 3
+  hilos de procesamiento paralelo más margen para el `JobRepository`, los Tasklets de
+  resumen y las particiones concurrentes del Job particionado (sección 4.2), sin
+  sobredimensionar y agotar conexiones del servidor.
 - **`ThreadPoolTaskExecutor`** con `corePoolSize == maxPoolSize == 3` y `queueCapacity`
   acotada: el número de hilos activos nunca supera el dimensionado explícito, evitando
   saturar la base de datos (práctica recomendada desde Spring Batch 5, en vez del
@@ -322,8 +379,12 @@ Hay dos caminos, no excluyentes, para obtener la "corrida real" del proyecto:
 El proyecto incluye **dos** workflows independientes:
 
 - [`.github/workflows/evidencia-ejecucion.yml`](.github/workflows/evidencia-ejecucion.yml):
-  el de las semanas 1-2, sin cambios. Compila el proyecto, levanta un PostgreSQL real, ejecuta
-  los 3 Jobs base (más la corrida de la rama `REVISION_REQUERIDA`) y publica los logs como
+  heredado de las semanas 1-2 (misma estructura de pasos), con las corridas actualizadas para
+  el dataset oficial de la semana 3. Compila el proyecto, levanta un PostgreSQL real, ejecuta
+  los 3 Jobs base contra el dataset oficial completo (transacciones e intereses derivan a
+  `REVISION_REQUERIDA`; cuentas-anuales completa el flujo normal), más dos corridas
+  adicionales de transacciones e intereses contra el subconjunto curado de `sample-data/`
+  para mostrar la rama `CALIDAD_OK` también en esos dos Jobs, y publica los 7 logs como
   artefacto `evidencia-ejecucion-banco-xyz`.
 - [`.github/workflows/evidencia-ejecucion-s3.yml`](.github/workflows/evidencia-ejecucion-s3.yml):
   **nuevo de la semana 3**. Ejecuta el Job particionado y el benchmark comparativo completo
@@ -373,10 +434,13 @@ Si prefieres ejecutar los Jobs manualmente uno por uno:
 ```bash
 docker compose up -d
 mvn clean package
+# dataset oficial semana_3 completo: transacciones e intereses derivan a REVISION_REQUERIDA
+# (21.5% y 83.6% de omision respectivamente); cuentas-anuales completa el flujo (CALIDAD_OK, 6%)
 java -jar target/banco-xyz-batch-1.0.0.jar transacciones
 java -jar target/banco-xyz-batch-1.0.0.jar intereses
 java -jar target/banco-xyz-batch-1.0.0.jar cuentas-anuales
-# rama alterna del decider (dataset original, ~60% de registros invalidos en intereses.csv):
+# rama CALIDAD_OK del decider, con el subconjunto curado (0% de omision por diseño):
+java -jar target/banco-xyz-batch-1.0.0.jar transacciones --batch.rutas.transacciones=classpath:sample-data/transacciones.csv
 java -jar target/banco-xyz-batch-1.0.0.jar intereses --batch.rutas.intereses=classpath:sample-data/intereses.csv
 # verificacion en base de datos:
 docker exec -it banco-xyz-postgres psql -U banco_xyz -d banco_xyz -c "SELECT * FROM resumen_transacciones_diarias;"

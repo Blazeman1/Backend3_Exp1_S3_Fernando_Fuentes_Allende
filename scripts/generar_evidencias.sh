@@ -30,20 +30,24 @@ mvn -q clean package | tee "$OUT/01-build.log"
 
 JAR="target/banco-xyz-batch-1.0.0.jar"
 
-echo "==> [3/7] Ejecutando Job 1: transaccionesDiariasJob..."
+echo "==> [3/9] Ejecutando Job 1: transaccionesDiariasJob (dataset oficial semana_3, ~21.5% omision -> REVISION_REQUERIDA)..."
 java -jar "$JAR" transacciones | tee "$OUT/02-job-transacciones.log"
 
-echo "==> [4/7] Ejecutando Job 2: interesesMensualesJob..."
+echo "==> [4/9] Ejecutando Job 2: interesesMensualesJob (dataset oficial semana_3, ~83.6% omision -> REVISION_REQUERIDA)..."
 java -jar "$JAR" intereses | tee "$OUT/03-job-intereses.log"
 
-echo "==> [5/7] Ejecutando Job 3: estadosCuentaAnualesJob..."
+echo "==> [5/9] Ejecutando Job 3: estadosCuentaAnualesJob (dataset oficial semana_3, ~6% omision -> CALIDAD_OK)..."
 java -jar "$JAR" cuentas-anuales | tee "$OUT/04-job-cuentas-anuales.log"
 
-echo "==> [6/7] Ejecutando Job 2 contra el dataset original (para ver la rama REVISION_REQUERIDA)..."
-java -jar "$JAR" intereses --batch.rutas.intereses=classpath:sample-data/intereses.csv \
-  | tee "$OUT/05-job-intereses-sample-data.log"
+echo "==> [6/9] Ejecutando Job 1 contra un subconjunto curado sin filas invalidas (para ver la rama CALIDAD_OK)..."
+java -jar "$JAR" transacciones --batch.rutas.transacciones=classpath:sample-data/transacciones.csv \
+  | tee "$OUT/05-job-transacciones-sample-data.log"
 
-echo "==> [7/7] Consultando los resultados en la base de datos..."
+echo "==> [7/9] Ejecutando Job 2 contra un subconjunto curado sin filas invalidas (para ver la rama CALIDAD_OK)..."
+java -jar "$JAR" intereses --batch.rutas.intereses=classpath:sample-data/intereses.csv \
+  | tee "$OUT/06-job-intereses-sample-data.log"
+
+echo "==> [8/9] Consultando los resultados en la base de datos..."
 {
   echo "=== resumen_transacciones_diarias ==="
   docker exec banco-xyz-postgres psql -U banco_xyz -d banco_xyz -c "SELECT * FROM resumen_transacciones_diarias;"
@@ -56,11 +60,18 @@ echo "==> [7/7] Consultando los resultados en la base de datos..."
   echo
   echo "=== anomalias detectadas por Job 1 ==="
   docker exec banco-xyz-postgres psql -U banco_xyz -d banco_xyz -c "SELECT es_anomalia, COUNT(*) FROM transacciones_procesadas GROUP BY es_anomalia;"
-} | tee "$OUT/06-consultas-sql.log"
+} | tee "$OUT/07-consultas-sql.log"
 
+echo "==> [9/9] Listo."
 echo
-echo "Listo. Evidencias guardadas en: $OUT"
+echo "Evidencias guardadas en: $OUT"
 echo "Revisa especialmente:"
 echo "  - '[Batch-Thread-' en 02/03/04 para confirmar el procesamiento en paralelo (3 hilos)"
 echo "  - 'RendimientoStepListener' para las métricas de throughput por Step"
-echo "  - 05-job-intereses-sample-data.log debería terminar en la rama REVISION_REQUERIDA"
+echo "  - 02-job-transacciones.log y 03-job-intereses.log deberían terminar en REVISION_REQUERIDA"
+echo "    (dataset oficial semana_3, con su tasa de error real); 05 y 06 (subconjunto curado)"
+echo "    deberían terminar en CALIDAD_OK"
+echo
+echo "Nota: como el Job 1 y el Job 2 corren dos veces cada uno (dataset oficial + subconjunto"
+echo "curado), la tabla en PostgreSQL al finalizar refleja la SEGUNDA corrida de cada uno (la"
+echo "del subconjunto curado) - ambos logs quedan igualmente guardados como evidencia."

@@ -9,25 +9,35 @@ import java.time.format.DateTimeParseException;
 /**
  * Utilidad compartida para normalizar las fechas de los archivos legacy del Banco XYZ.
  *
- * <p>El repositorio de datos legacy (README de
- * <a href="https://github.com/KariVillagran/bank_legacy_data">bank_legacy_data</a>) advierte
- * explicitamente que las fechas llegan en dos formatos posibles: {@code yyyy-MM-dd} (formato
- * correcto) y {@code yyyy/MM/dd} (formato legacy incorrecto). Esta clase intenta ambos formatos
- * y, si ninguno aplica, lanza {@link InvalidDataException} para que la {@code SkipPolicy}
- * personalizada decida omitir el registro.</p>
+ * <p>El README general de
+ * <a href="https://github.com/KariVillagran/bank_legacy_data">bank_legacy_data</a> advierte,
+ * en terminos generales, que las fechas llegan en dos formatos posibles: {@code yyyy-MM-dd}
+ * (formato correcto) y {@code yyyy/MM/dd} (formato legacy incorrecto). Sin embargo, el dataset
+ * OFICIAL de la semana 3 (carpeta {@code data/semana_3} del repositorio, usado por esta
+ * actividad sumativa) trae en la practica <b>cuatro</b> formatos distintos, verificado
+ * programaticamente sobre el propio CSV: {@code yyyy-MM-dd} (294 filas), {@code yyyy/MM/dd}
+ * (222), y ademas {@code dd-MM-yyyy} (250) y {@code dd/MM/yyyy} (234) - dia primero, convencion
+ * habitual en Chile/Latinoamerica, confirmada sin ambiguedad porque una parte de esas fechas
+ * trae un primer campo mayor a 12 (imposible como mes). Esta clase intenta los cuatro formatos
+ * en orden y, si ninguno aplica (por ejemplo, {@code 2024-13-01}: estructura valida pero mes
+ * 13 inexistente, tambien presente en el dataset real), lanza {@link InvalidDataException} para
+ * que la {@code SkipPolicy} personalizada decida omitir el registro.</p>
  */
 public final class FechaFlexibleParser {
 
     private static final DateTimeFormatter FORMATO_ESTANDAR = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-    private static final DateTimeFormatter FORMATO_LEGACY = DateTimeFormatter.ofPattern("yyyy/MM/dd");
+    private static final DateTimeFormatter FORMATO_LEGACY_SLASH_AMD = DateTimeFormatter.ofPattern("yyyy/MM/dd");
+    private static final DateTimeFormatter FORMATO_LEGACY_GUION_DMA = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+    private static final DateTimeFormatter FORMATO_LEGACY_SLASH_DMA = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     private FechaFlexibleParser() {
         // utilidad estatica, no instanciable
     }
 
     /**
-     * Intenta parsear la fecha probando primero el formato estandar ISO ({@code yyyy-MM-dd})
-     * y luego el formato legacy con slash ({@code yyyy/MM/dd}).
+     * Intenta parsear la fecha probando, en orden, el formato estandar ISO
+     * ({@code yyyy-MM-dd}) y los tres formatos legacy observados en el dataset real de la
+     * semana 3: {@code yyyy/MM/dd}, {@code dd-MM-yyyy} y {@code dd/MM/yyyy}.
      *
      * @param valorCrudo valor tal como llega del CSV
      * @return la fecha normalizada
@@ -38,15 +48,16 @@ public final class FechaFlexibleParser {
             throw new InvalidDataException("Fecha vacia o nula");
         }
         String valor = valorCrudo.trim();
-        try {
-            return LocalDate.parse(valor, FORMATO_ESTANDAR);
-        } catch (DateTimeParseException primeraFallida) {
+        for (DateTimeFormatter formato : new DateTimeFormatter[] {
+                FORMATO_ESTANDAR, FORMATO_LEGACY_SLASH_AMD, FORMATO_LEGACY_GUION_DMA, FORMATO_LEGACY_SLASH_DMA
+        }) {
             try {
-                return LocalDate.parse(valor, FORMATO_LEGACY);
-            } catch (DateTimeParseException segundaFallida) {
-                throw new InvalidDataException("Formato de fecha no reconocido: '" + valorCrudo + "'");
+                return LocalDate.parse(valor, formato);
+            } catch (DateTimeParseException ignorada) {
+                // se intenta el siguiente formato soportado
             }
         }
+        throw new InvalidDataException("Formato de fecha no reconocido: '" + valorCrudo + "'");
     }
 
     /**

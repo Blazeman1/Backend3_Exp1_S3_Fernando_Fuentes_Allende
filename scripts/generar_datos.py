@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
 """
+NOTA (Semana 3): este script queda como referencia historica de las semanas 1-2, cuando el
+dataset oficial de esa epoca (carpeta data/semana_2 del repositorio legacy) solo traia 8-10
+filas por archivo -insuficiente para evidenciar de forma convincente chunks + multithreading- y
+por eso se generaba aqui una version sintetica ampliada.
+
+Para la actividad sumativa individual de la semana 3, el dataset oficial correspondiente
+(https://github.com/KariVillagran/bank_legacy_data, carpeta data/semana_3) YA trae 1000 filas
+por archivo, con una tasa de error real (no fabricada) suficiente por si sola para evidenciar
+el procesamiento en chunks, el multithreading/particionado, y las politicas de tolerancia a
+fallos. Por eso este script YA NO se ejecuta como parte del flujo normal de la semana 3: los
+archivos en src/main/resources/data/ son ahora una copia directa, sin modificar, del dataset
+oficial de semana_3, y los de src/main/resources/sample-data/ son subconjuntos curados
+(filtrados programaticamente, sin inventar valores) de ese mismo dataset oficial, usados para
+demostrar puntualmente la rama CALIDAD_OK del ControlCalidadDecider (ver README, seccion 1).
+
 Genera datasets sinteticos, pero mas grandes, para los 3 procesos batch del Banco XYZ,
 preservando los MISMOS patrones de calidad de datos descritos en el README del repositorio
-oficial (https://github.com/KariVillagran/bank_legacy_data): montos negativos/cero/vacios,
-fechas en dos formatos, edades fuera de rango, tipos invalidos, registros duplicados y
-descripciones faltantes.
+oficial: montos negativos/cero/vacios, fechas en dos formatos, edades fuera de rango, tipos
+invalidos, registros duplicados y descripciones faltantes.
 
-El dataset oficial (semana 2) solo trae 8-10 filas por archivo, insuficiente para evidenciar
-de forma convincente el procesamiento en chunks + multithreading exigido por la actividad.
-Este script produce una version ampliada (cientos de filas) con una tasa de error controlada
-(~15%), que se deja en src/main/resources/data/ y es la que usan los Jobs por defecto.
-Los 3 CSV originales, sin modificar, se conservan en src/main/resources/sample-data/ como
-referencia y para poder demostrar puntualmente la rama "REVISION_REQUERIDA" del
-ControlCalidadDecider (ver README).
-
-Uso: python3 scripts/generar_datos.py
+Uso (solo si se quiere reproducir el dataset sintetico historico de la semana 2):
+python3 scripts/generar_datos.py
 """
 import csv
 import random
