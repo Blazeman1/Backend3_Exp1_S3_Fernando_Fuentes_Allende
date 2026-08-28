@@ -287,6 +287,30 @@ java -jar target/banco-xyz-batch-1.0.0.jar transacciones-particionado --batch.gr
 No forma parte de la opción `todos` a propósito, para no alterar la evidencia ya validada
 del modo multi-hilo; se ejecuta explícitamente por su propio nombre.
 
+> **Nota de evidencia real (28-08-2026):** el primer benchmark real de este Job particionado
+> reveló dos bugs adicionales, ambos ya corregidos:
+>
+> 1. `transaccionesDiariasParticionadoJob` reutiliza `revisionTransaccionesStep` (el mismo Step
+>    que usa `transaccionesDiariasJob`) y tenía exactamente el mismo bug de `BatchStatus.FAILED`
+>    descrito en la sección 5 más abajo -faltaba la transición explícita
+>    `.on("*").end(...)` tras `.to(revisionTransaccionesStep)`- por lo que terminaba `FAILED` en
+>    vez de `COMPLETED` cada vez que el `grid-size` probado hacía que el Job derivara a
+>    `REVISION_REQUERIDA` (lo cual, con el dataset oficial completo, es siempre: 23.9% de
+>    omisión sección 1.1). Se corrigió igual que en los otros dos Jobs.
+> 2. `JobResumenListener` sumaba **el doble** de lo correcto (`leidos=2000`, `escritos=1522`,
+>    `omitidos=478` en vez de 1000/761/239) al ejecutar el Job particionado. Causa: Spring Batch
+>    agrega (copia) los contadores de las `grid-size` particiones dentro del propio
+>    `StepExecution` del Step "manager" (`particionTransaccionesStep`) -confirmado leyendo el
+>    log de `ControlCalidadDecider`, que ya mostraba el 23.9% correcto tomándolo de ese mismo
+>    `StepExecution`- pero además cada partición hija queda registrada por separado en
+>    `jobExecution.getStepExecutions()` con el nombre `workerCargaTransaccionesStep:particionN`.
+>    Sumar TODAS las `StepExecution` (como hacía `JobResumenListener`) contaba dos veces lo
+>    mismo: una vez ya agregado en el manager y otra vez por cada partición individual. Se
+>    corrigió filtrando en `JobResumenListener` cualquier `StepExecution` cuyo nombre contenga
+>    `":"` (la convención de nombres que Spring Batch usa exclusivamente para particiones hijas;
+>    ningún Step normal de este proyecto lleva `":"` en su nombre, así que el filtro no afecta a
+>    los demás Jobs).
+
 ### 4.3 Benchmark comparativo: encontrando la configuración óptima
 
 Para cumplir el criterio *"comparando diferentes parámetros para encontrar la configuración

@@ -212,6 +212,15 @@ public class TransaccionesParticionadoJobConfig {
                 .next(particionTransaccionesStep)
                 .next(controlCalidadTransaccionesDecider)
                     .on(ControlCalidadDecider.REVISION_REQUERIDA).to(revisionTransaccionesStep)
+                        // Ver comentario detallado en TransaccionesJobConfig: sin esta transicion
+                        // explicita, el Step colgante revisionTransaccionesStep hereda la regla por
+                        // defecto de FlowBuilder (on("COMPLETED").end() + on("*").fail()) y, como su
+                        // ExitStatus real es "REVISION_REQUERIDA" (no "COMPLETED"), el Job terminaba
+                        // con BatchStatus.FAILED en vez de completar normalmente con ese exit status
+                        // informativo (confirmado con evidencia real de ejecucion: este Job comparte
+                        // el mismo revisionTransaccionesStep que transaccionesDiariasJob y por eso
+                        // tenia exactamente el mismo bug).
+                        .on("*").end(ControlCalidadDecider.REVISION_REQUERIDA)
                 .from(controlCalidadTransaccionesDecider)
                     .on(ControlCalidadDecider.CALIDAD_OK).to(resumenTransaccionesStep)
                 .end()
