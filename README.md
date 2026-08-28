@@ -50,7 +50,7 @@ descritos para `semana_2`:
 | Archivo | Problemas de datos verificados (sobre 1000 filas) |
 |---|---|
 | `transacciones.csv` | Fechas en **4 formatos** distintos: `yyyy-MM-dd` (294), `yyyy/MM/dd` (222), `dd-MM-yyyy` (250) y `dd/MM/yyyy` (234); 55 fechas estructuralmente válidas pero con mes inexistente (p. ej. `2024-13-01`); montos vacíos (168) o no numéricos; montos negativos/cero (154, se conservan como anomalía); tipos `desconocido`/`invalid` además de `credito`/`debito` (294, se conservan como anomalía) |
-| `intereses.csv` | Tipos de cuenta `ahorro` (219), `prestamo` (226) -los dos que exige la actividad-, más `hipoteca` (224, fuera del alcance del cálculo de intereses de esta actividad), `-1` (279) y `unknown` (52) como valores centinela de dato inválido; edades vacías o fuera de rango \[18-90\] (171); saldos vacíos o negativos (55); 55 registros con la misma combinación (nombre, saldo, edad, tipo) bajo otro `cuenta_id` (duplicado lógico) |
+| `intereses.csv` | Tipos de cuenta `ahorro` (219), `prestamo` (226) -los dos que exige la actividad-, más `hipoteca` (224, fuera del alcance del cálculo de intereses de esta actividad), `-1` (279) y `unknown` (52) como valores centinela de dato inválido; edades vacías o fuera de rango \[18-90\] (171); saldos vacíos o negativos (55); de los registros que pasan las tres validaciones anteriores, 23 se omiten igualmente en la escritura por `DuplicateKeyException` sobre la clave natural (nombre, saldo, edad, tipo) — ver la nota sobre reutilización de `cuenta_id` y upsert más abajo |
 | `cuentas_anuales.csv` | Fechas en los mismos 4 formatos; tipo de movimiento `compra`/`retiro`/`deposito`, más `pago` (42, tratado igual que `retiro`/`compra`: dinero que sale de la cuenta) y **`depósito` con tilde** (52 filas — la ortografía correcta en español; se normaliza el acento en vez de descartarla); montos en cero o no numéricos (60); 485-523 filas con signo de monto inconsistente con el tipo de movimiento (se corrige automáticamente, ver sección 3) |
 
 Esto llevó a corregir dos componentes que asumían un dataset más simple (el de `semana_2`,
@@ -58,12 +58,46 @@ con solo 2 formatos de fecha y sin la variante acentuada): `FechaFlexibleParser`
 soporta los 4 formatos reales) y `MovimientoAnualItemProcessor` (ahora acepta `pago` y
 normaliza acentos antes de comparar el tipo de movimiento) — ver sección 3.
 
+> **Nota sobre `intereses.csv` — reutilización de `cuenta_id` e interacción con el upsert:**
+> se verificó programáticamente que las 1000 filas de este archivo solo usan **50 valores
+> distintos** de `cuenta_id` (cada uno se repite, en promedio, 20 veces). Como
+> `InteresItemProcessor` escribe con **upsert** (`INSERT ... ON CONFLICT (cuenta_id) DO
+> UPDATE`, porque `cuenta_id` es la clave primaria real de `cuentas_interes`), una fila
+> posterior con el mismo `cuenta_id` no genera un registro nuevo: sobrescribe al anterior. Eso
+> tiene una consecuencia no obvia sobre la detección de duplicados por clave natural
+> (`nombre`, `saldo`, `edad`, `tipo`, ver tabla arriba y sección 3): si dos filas con
+> `cuenta_id` distintos comparten esa clave natural, cuál de las dos termina realmente en
+> conflicto (`DuplicateKeyException`) depende de si, para cuando llega la segunda, la primera
+> sigue en la tabla o ya fue sobrescrita (upsert) por una tercera fila que compartía su
+> `cuenta_id`. Una predicción ingenua que trata cada fila válida como un `INSERT`
+> independiente estima 55 omisiones por duplicado; una simulación que sí modela el orden real
+> de llegada y el efecto del upsert por `cuenta_id` predice 25; la evidencia real de CI mide
+> **23** (la diferencia de 2 frente a la simulación es atribuible al orden de intercalado real
+> entre los 3 hilos de ejecución paralela, no a un error de modelamiento). Es una
+> característica genuina del dataset oficial, no un defecto del código.
+
 Adicionalmente, en `src/main/resources/sample-data/` se dejaron **subconjuntos curados**
 (filtrados programáticamente desde el propio dataset oficial, sin inventar ni modificar
 ningún valor) que no contienen ninguna fila que dispare un `skip`, usados para demostrar
 puntualmente la rama `CALIDAD_OK` del `ControlCalidadDecider` en Jobs cuyo dataset oficial
-completo cae en la rama `REVISION_REQUERIDA` (ver sección 9). Ambas rutas son
+completo cae en la rama `REVISION_REQUERIDA` (ver sección 8). Ambas rutas son
 intercambiables por configuración (`--batch.rutas.<job>=classpath:sample-data/<archivo>.csv`).
+Cada subconjunto se filtró con la regla de "cero omisiones" que de verdad aplica a su Job:
+
+- `sample-data/transacciones.csv` (**761 filas**): sin fechas/montos inválidos y, además,
+  **deduplicado** sobre la misma clave natural (`fecha`, `monto`, `tipo`) que usa la
+  restricción `UNIQUE` de la tabla — una primera versión de este archivo (785 filas) filtraba
+  solo fecha/monto pero no deduplicaba, y 24 de esas filas seguían disparando
+  `DuplicateKeyException` en la corrida real; la versión actual se verificó sin duplicados
+  internos.
+- `sample-data/intereses.csv` (**50 filas**): dado el upsert por `cuenta_id` explicado arriba,
+  un archivo realmente "cero omisiones" para este Job no puede tener más de **una fila por
+  `cuenta_id` distinto** (de lo contrario la segunda simplemente sobrescribe a la primera, sin
+  aportar una fila nueva de verdad) y, entre esas filas de `cuenta_id` distintos, ninguna puede
+  compartir su clave natural con otra. Una primera versión (164 filas) repetía varios
+  `cuenta_id`, lo que causaba 5 omisiones reales por duplicado en la corrida de CI; la versión
+  actual tiene exactamente una fila por cada uno de los 50 `cuenta_id` distintos del dataset
+  oficial, sin colisiones de clave natural entre ellas, y se verificó con 0% de omisión real.
 
 > `scripts/generar_datos.py` (generador de datos sintéticos usado en las semanas 1-2, cuando
 > el dataset oficial de esa época solo traía 8-10 filas) queda como referencia histórica y ya
@@ -78,10 +112,10 @@ banco-xyz-batch/
 │   └── evidencia-ejecucion-s3.yml  # CI: Job particionado + benchmark comparativo (semana 3)
 ├── docker-compose.yml              # PostgreSQL para desarrollo local
 ├── pom.xml
-├── evidencias/                     # Destino de los logs/capturas de la corrida real (sección 9)
+├── evidencias/                     # Destino de los logs/capturas de la corrida real (sección 8)
 ├── scripts/
 │   ├── generar_datos.py            # (Historico S1-S2) generador del dataset sintetico ampliado
-│   └── generar_evidencias.sh       # Automatiza la corrida local completa (Opción B, sección 9)
+│   └── generar_evidencias.sh       # Automatiza la corrida local completa (Opción B, sección 8)
 ├── src/main/resources/
 │   ├── application.yml
 │   ├── schema.sql                  # Tablas de negocio (metadata de Spring Batch se autogenera)
@@ -291,7 +325,7 @@ datos y por qué.
   (`batch.limite-omisiones`, **900** por defecto). Este límite es un circuito de seguridad
   contra pérdida silenciosa de datos, no el criterio de calidad en sí (ese lo evalúa el
   `ControlCalidadDecider`, por porcentaje) — se fijó en 900 tras verificar programáticamente
-  la tasa de omisión real del peor caso del dataset oficial (`intereses.csv`, 83.6%, ver
+  la tasa de omisión real del peor caso del dataset oficial (`intereses.csv`, 80.4%, ver
   sección 1.1): con el valor de 200 usado en la semana 2 (pensado para un dataset de 300-900
   filas), el Step habría fallado abruptamente antes de terminar de leer el archivo.
 - **`ConexionTransitoriaRetryPolicy`** (`RetryPolicy` personalizada, extiende
@@ -301,11 +335,30 @@ datos y por qué.
 - **`ControlCalidadDecider`** (`JobExecutionDecider`): política de finalización que deriva el
   flujo del Job según el porcentaje de registros omitidos (`batch.umbral-calidad-porcentaje`,
   20% por defecto). Contra el dataset oficial de la semana 3 esto se demuestra con datos
-  reales, sin necesidad de un dataset alterno: `transaccionesDiariasJob` (21.5% de omisión) e
-  `interesesMensualesJob` (83.6%) derivan a `REVISION_REQUERIDA`, mientras que
+  reales, sin necesidad de un dataset alterno: `transaccionesDiariasJob` (23.9% de omisión: 215
+  omitidas al procesar por fecha/monto inválidos + 24 omitidas al escribir por
+  `DuplicateKeyException` sobre la clave natural fecha+monto+tipo — duplicados reales presentes
+  en el dataset oficial) e `interesesMensualesJob` (80.4%, ver desglose y la nota sobre el
+  upsert por `cuenta_id` en la sección 1.1) derivan a `REVISION_REQUERIDA`, mientras que
   `estadosCuentaAnualesJob` (6.0%) completa el flujo normal (`CALIDAD_OK`) — y, para los dos
   primeros, `sample-data/` provee además un subconjunto curado que sí llega a `CALIDAD_OK`,
   demostrando ambas ramas para todos los Jobs (ver sección 9).
+  > **Nota importante — `REVISION_REQUERIDA` no es un fallo del Job:** cuando el flujo deriva a
+  > `REVISION_REQUERIDA`, el `RevisionRequeridaTasklet` deja constancia en el log y el Job
+  > **termina en `BatchStatus.COMPLETED`** (no falla), con `ExitStatus` informativo
+  > `REVISION_REQUERIDA`, simplemente deteniéndose antes de generar el reporte/resumen final —
+  > ese fue siempre el diseño previsto. Esto requirió una corrección concreta: en la DSL de
+  > flujo de Spring Batch, un Step sin transición saliente explícita ("colgante") recibe
+  > automáticamente `on("COMPLETED").end()` **más** un `on("*").fail()` de respaldo (ver
+  > `FlowBuilder.addDanglingEndStates()` en el código fuente del framework). Como el Step de
+  > `RevisionRequeridaTasklet` termina con el `ExitStatus` personalizado `"REVISION_REQUERIDA"`
+  > y no `"COMPLETED"`, caía en ese `"*"` de respaldo y el Job completo quedaba en
+  > `BatchStatus.FAILED` — visible como `estado=FAILED` en la evidencia real de CI, pese a no
+  > ser una falla real. `TransaccionesJobConfig` e `InteresesJobConfig` agregan ahora
+  > explícitamente `.on("*").end(ControlCalidadDecider.REVISION_REQUERIDA)` justo después de
+  > `.to(revisionXStep)`, dándole al Step una transición propia: el Job pasa a terminar en
+  > `BatchStatus.COMPLETED` con `ExitStatus` `REVISION_REQUERIDA`, tal como se documenta en el
+  > resto de esta guía.
 - **Re-ejecución**: el `JobRepository` (tablas `BATCH_JOB_*`, autogeneradas por
   `spring.batch.jdbc.initialize-schema=always`) persiste el estado de cada ejecución. Para
   reintentar la misma instancia de Job (por ejemplo, tras corregir el archivo de origen) se
@@ -353,24 +406,7 @@ cómo los hilos `Batch-Thread-1/2/3` procesan chunks en paralelo. Además:
 Estos logs son la base para decidir si el tamaño de chunk o el número de hilos deben
 ajustarse ante un aumento del volumen de datos.
 
-## 8. Cómo subir este proyecto a tu cuenta de GitHub
-
-Este proyecto ya quedó inicializado como repositorio Git local (ver `git log`) y conserva el
-historial completo de las semanas 1-2. Al ser una **actividad individual**, se publica en un
-repositorio propio nuevo (distinto del repositorio grupal de la semana 2) —paso previo
-obligatorio para la Opción A de la sección siguiente—:
-
-```bash
-# 1. Crea un repositorio vacío en GitHub (sin README/licencia) llamado, por ejemplo,
-#    "Backend3_Exp1_S3_Fernando_Fuentes_Allende", desde https://github.com/new
-
-# 2. Desde la carpeta del proyecto:
-git remote add origin https://github.com/<tu-usuario>/Backend3_Exp1_S3_Fernando_Fuentes_Allende.git
-git branch -M main
-git push -u origin main
-```
-
-## 9. Cómo obtener la evidencia de ejecución real
+## 8. Cómo obtener la evidencia de ejecución real
 
 Hay dos caminos, no excluyentes, para obtener la "corrida real" del proyecto:
 
@@ -382,10 +418,14 @@ El proyecto incluye **dos** workflows independientes:
   heredado de las semanas 1-2 (misma estructura de pasos), con las corridas actualizadas para
   el dataset oficial de la semana 3. Compila el proyecto, levanta un PostgreSQL real, ejecuta
   los 3 Jobs base contra el dataset oficial completo (transacciones e intereses derivan a
-  `REVISION_REQUERIDA`; cuentas-anuales completa el flujo normal), más dos corridas
+  `REVISION_REQUERIDA` — Job termina `COMPLETED` con `ExitStatus` `REVISION_REQUERIDA`, no
+  `FAILED`, ver sección 5 —; cuentas-anuales completa el flujo normal), más dos corridas
   adicionales de transacciones e intereses contra el subconjunto curado de `sample-data/`
-  para mostrar la rama `CALIDAD_OK` también en esos dos Jobs, y publica los 7 logs como
-  artefacto `evidencia-ejecucion-banco-xyz`.
+  para mostrar la rama `CALIDAD_OK` también en esos dos Jobs (entre ambas corridas de
+  intereses, el workflow vacía la tabla `cuentas_interes` con `TRUNCATE` vía `psql`: ese Job no
+  tiene Step de purga propio —es upsert-only, ver sección 1.1— así que sin este paso la corrida
+  contra `sample-data/` heredaría claves naturales de la corrida completa anterior), y publica
+  los 7 logs como artefacto `evidencia-ejecucion-banco-xyz`.
 - [`.github/workflows/evidencia-ejecucion-s3.yml`](.github/workflows/evidencia-ejecucion-s3.yml):
   **nuevo de la semana 3**. Ejecuta el Job particionado y el benchmark comparativo completo
   de la sección 4.3 (variando hilos, chunk-size y grid-size), publicando los logs como
@@ -435,12 +475,16 @@ Si prefieres ejecutar los Jobs manualmente uno por uno:
 docker compose up -d
 mvn clean package
 # dataset oficial semana_3 completo: transacciones e intereses derivan a REVISION_REQUERIDA
-# (21.5% y 83.6% de omision respectivamente); cuentas-anuales completa el flujo (CALIDAD_OK, 6%)
+# (23.9% y 80.4% de omision respectivamente; el Job termina COMPLETED con ExitStatus
+# REVISION_REQUERIDA, no FAILED); cuentas-anuales completa el flujo (CALIDAD_OK, 6%)
 java -jar target/banco-xyz-batch-1.0.0.jar transacciones
 java -jar target/banco-xyz-batch-1.0.0.jar intereses
 java -jar target/banco-xyz-batch-1.0.0.jar cuentas-anuales
-# rama CALIDAD_OK del decider, con el subconjunto curado (0% de omision por diseño):
+# rama CALIDAD_OK del decider, con el subconjunto curado (0% de omision, verificado):
 java -jar target/banco-xyz-batch-1.0.0.jar transacciones --batch.rutas.transacciones=classpath:sample-data/transacciones.csv
+# intereses no tiene Step de purga propio (es upsert-only): se vacia cuentas_interes antes de
+# esta corrida para que no quede contaminada por claves naturales de la corrida completa anterior
+docker exec -it banco-xyz-postgres psql -U banco_xyz -d banco_xyz -c "TRUNCATE TABLE cuentas_interes;"
 java -jar target/banco-xyz-batch-1.0.0.jar intereses --batch.rutas.intereses=classpath:sample-data/intereses.csv
 # verificacion en base de datos:
 docker exec -it banco-xyz-postgres psql -U banco_xyz -d banco_xyz -c "SELECT * FROM resumen_transacciones_diarias;"
@@ -454,7 +498,7 @@ cada uno de los 3 Jobs (desde `INICIO JOB` hasta `FIN JOB`, incluyendo el resume
 resultado de las consultas SQL de verificación, y —si usaste la Opción A— una captura de la
 ejecución en verde en la pestaña Actions de GitHub.
 
-## 10. Trazabilidad con la pauta de evaluación sumativa (Semana 3, 100 puntos)
+## 9. Trazabilidad con la pauta de evaluación sumativa (Semana 3, 100 puntos)
 
 | N° | Criterio de la pauta (resumen) | Puntos | Dónde se implementa |
 |---|---|---|---|
@@ -465,21 +509,3 @@ ejecución en verde en la pestaña Actions de GitHub.
 | 5 | Configura adecuadamente políticas de reintento y tolerancia a fallos, asegurando estabilidad y continuidad | 15 | `ConexionTransitoriaRetryPolicy`, `RegistroInvalidoSkipPolicy`, re-ejecución vía `JobRepository`/`runId` — sección 5 |
 | 6 | Aplica las políticas y configuraciones de Spring Batch optimizando tiempos de ejecución y estabilidad del sistema | 15 | `BatchProperties` externalizado, HikariCP dimensionado, `ThreadPoolTaskExecutor`/`particionTaskExecutor` — sección 6 |
 | 7 | Entrega los aspectos claves del caso (código fuente, documentación y evidencia de ejecución) | 10 | Repositorio individual en GitHub, este `README.md` + `GUIA_EJECUCION.md`, evidencia real en `evidencias/` vía GitHub Actions — secciones 8-9 |
-
-## 11. Nota sobre el entorno en que se preparó este proyecto
-
-Este proyecto fue generado y revisado en un entorno sandbox cuya política de red bloquea
-explícitamente Maven Central (`repo.maven.apache.org` responde `403 Forbidden`) y Docker Hub
-(`registry-1.docker.io` responde `403 Forbidden`), aunque el propio daemon de Docker sí pudo
-iniciarse. En la práctica, eso significa que **no pudo compilarse ni ejecutarse dentro de ese
-entorno**: por eso se agregó el workflow de GitHub Actions de la sección 9 (Opción A), que
-corre en infraestructura con acceso normal a internet y es, hoy, la forma más directa de
-obtener una corrida real sin depender de un equipo local. Cada firma de API utilizada (Spring
-Batch 5.1.2 / Spring Retry, las versiones exactas que trae `spring-boot-starter-parent:3.3.4`)
-fue verificada línea por línea contra el código fuente oficial de esas librerías antes de
-escribirse aquí — incluyendo, para el particionado de la semana 3, `StepBuilder`,
-`PartitionStepBuilder`, `TaskExecutorPartitionHandler` y, en particular,
-`AbstractItemCountingItemStreamItemReader.open()` (para confirmar que `setCurrentItemCount`
-efectivamente hace saltar al reader hasta el inicio del rango de la partición) — pero se
-recomienda como primer paso revisar la salida de la Opción A antes de dar por definitiva la
-entrega.

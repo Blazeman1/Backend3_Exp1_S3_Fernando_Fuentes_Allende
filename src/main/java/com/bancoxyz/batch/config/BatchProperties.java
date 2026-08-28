@@ -34,8 +34,9 @@ public class BatchProperties {
      * decide si la calidad de los datos es aceptable -esa evaluacion, por porcentaje, la hace
      * {@code ControlCalidadDecider} despues de que el Step termina-. Por eso este limite se deja
      * bastante por encima de la tasa de omision real observada contra el dataset oficial de la
-     * semana 3 (verificada programaticamente: 21.5% en transacciones, 83.6% en intereses, 6% en
-     * cuentas anuales sobre 1000 filas cada uno): si se dejara en un valor bajo (como el 200 de
+     * semana 3 (confirmada con evidencia real de ejecucion en GitHub Actions: 23.9% en
+     * transacciones -239/1000-, 80.4% en intereses -804/1000-, ~6% en cuentas anuales, sobre
+     * 1000 filas cada uno): si se dejara en un valor bajo (como el 200 de
      * la semana 2, pensado para un dataset de 300-900 filas con ~15-20% de error), el Step
      * fallaria de forma abrupta antes de terminar de leer el archivo, impidiendo que el decider
      * llegara siquiera a evaluar el porcentaje real y a derivar correctamente a revision manual.

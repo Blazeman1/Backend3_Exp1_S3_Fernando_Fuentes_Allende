@@ -158,6 +158,20 @@ public class TransaccionesJobConfig {
                 .next(cargaTransaccionesStep)
                 .next(controlCalidadTransaccionesDecider)
                     .on(ControlCalidadDecider.REVISION_REQUERIDA).to(revisionTransaccionesStep)
+                        // IMPORTANTE: revisionTransaccionesStep queda "colgando" (sin .next() posterior).
+                        // Sin esta transicion explicita, Spring Batch le agrega automaticamente una
+                        // transicion por defecto on("COMPLETED").end() + on("*").fail() a TODO Step
+                        // colgante (ver FlowBuilder.addDanglingEndStates()); como RevisionRequeridaTasklet
+                        // fija un ExitStatus personalizado ("REVISION_REQUERIDA", no "COMPLETED"), cae en
+                        // el "*" y el Job completo termina con BatchStatus.FAILED (verificado leyendo el
+                        // codigo fuente real de FlowBuilder y confirmado con evidencia real de ejecucion:
+                        // sin esta linea el Job quedaba en estado=FAILED en vez de completar con el
+                        // exit status informativo REVISION_REQUERIDA). Con .end(status) el Step si tiene
+                        // una transicion propia: el Job termina en BatchStatus.COMPLETED (no fallo real
+                        // del framework) pero con ExitStatus.getExitCode()="REVISION_REQUERIDA", que es
+                        // el diseno original: dejar constancia sin generar el reporte, sin marcar el Job
+                        // como fallido.
+                        .on("*").end(ControlCalidadDecider.REVISION_REQUERIDA)
                 .from(controlCalidadTransaccionesDecider)
                     .on(ControlCalidadDecider.CALIDAD_OK).to(resumenTransaccionesStep)
                 .end()

@@ -53,13 +53,16 @@ jobs:
       - name: Compilar el proyecto (mvn clean package)
         run: mvn -B clean package | tee evidencias-ci/evidencia-01-build.log
 
-      - name: Ejecutar Job 1 - Reporte de Transacciones Diarias (dataset oficial semana_3, ~21.5% de omision -> rama REVISION_REQUERIDA)
+      - name: Instalar cliente psql (se usa para el truncate previo a Job 2 sample-data y las consultas finales)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+
+      - name: Ejecutar Job 1 - Reporte de Transacciones Diarias (dataset oficial semana_3, 23.9% de omision real -> rama REVISION_REQUERIDA)
         continue-on-error: true
         run: |
           java -jar target/banco-xyz-batch-1.0.0.jar transacciones \
             | tee evidencias-ci/evidencia-02-job-transacciones.log
 
-      - name: Ejecutar Job 2 - Cálculo de Intereses Mensuales (dataset oficial semana_3, ~83.6% de omision -> rama REVISION_REQUERIDA)
+      - name: Ejecutar Job 2 - Cálculo de Intereses Mensuales (dataset oficial semana_3, 80.4% de omision real -> rama REVISION_REQUERIDA)
         continue-on-error: true
         run: |
           java -jar target/banco-xyz-batch-1.0.0.jar intereses \
@@ -78,6 +81,21 @@ jobs:
             --batch.rutas.transacciones=classpath:sample-data/transacciones.csv \
             | tee evidencias-ci/evidencia-05-job-transacciones-sample-data.log
 
+      - name: Vaciar cuentas_interes antes de la corrida sample-data (Job 2 es upsert-only, sin Step de purga propio)
+        continue-on-error: true
+        env:
+          PGPASSWORD: banco_xyz
+        run: |
+          # El dataset oficial de intereses.csv reutiliza cuenta_id (solo 50 valores distintos
+          # para 1000 filas: verificado programaticamente). Como el writer usa
+          # "INSERT ... ON CONFLICT (cuenta_id) DO UPDATE" (upsert) y el Job 2 no tiene un Step de
+          # purga propio -a diferencia del Job 1- las filas que la corrida completa (paso anterior)
+          # dejo en la tabla siguen ahi. Sin este truncate, algun cuenta_id del subconjunto curado
+          # (que reutiliza el mismo rango 101-150) podria chocar con la restriccion UNIQUE natural
+          # contra una fila que la corrida completa dejo vigente bajo OTRO cuenta_id, y la
+          # demostracion de la rama CALIDAD_OK (0% de omision) dejaria de ser 0%.
+          psql -h localhost -U banco_xyz -d banco_xyz -c "TRUNCATE TABLE cuentas_interes;"
+
       - name: Ejecutar Job 2 contra un subconjunto curado sin filas invalidas (rama CALIDAD_OK del decider)
         continue-on-error: true
         run: |
@@ -90,7 +108,6 @@ jobs:
         env:
           PGPASSWORD: banco_xyz
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
           {
             echo "=== resumen_transacciones_diarias ==="
             psql -h localhost -U banco_xyz -d banco_xyz -c "SELECT * FROM resumen_transacciones_diarias;"

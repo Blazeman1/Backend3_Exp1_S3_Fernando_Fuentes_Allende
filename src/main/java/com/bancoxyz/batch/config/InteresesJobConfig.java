@@ -160,6 +160,13 @@ public class InteresesJobConfig {
                 .start(calculoInteresesStep)
                 .next(controlCalidadInteresesDecider)
                     .on(ControlCalidadDecider.REVISION_REQUERIDA).to(revisionInteresesStep)
+                        // Ver comentario detallado en TransaccionesJobConfig: sin esta transicion
+                        // explicita, el Step colgante revisionInteresesStep hereda la regla por defecto
+                        // de FlowBuilder (on("COMPLETED").end() + on("*").fail()) y, como su ExitStatus
+                        // real es "REVISION_REQUERIDA" (no "COMPLETED"), el Job terminaba con
+                        // BatchStatus.FAILED en vez de completar normalmente con ese exit status
+                        // informativo (confirmado con evidencia real de ejecucion).
+                        .on("*").end(ControlCalidadDecider.REVISION_REQUERIDA)
                 .from(controlCalidadInteresesDecider)
                     .on(ControlCalidadDecider.CALIDAD_OK).to(confirmacionInteresesStep)
                 .end()

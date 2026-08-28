@@ -6,160 +6,46 @@ cuenta_id,nombre,saldo,edad,tipo
 113,Alice Brown,10000,45,prestamo
 111,Diana Prince,5000,30,prestamo
 105,Diana Prince,10000,25,prestamo
-133,Diana Prince,8000,40,prestamo
 126,Bob Johnson,12000,35,prestamo
 118,John Doe,8000,40,prestamo
 108,John Doe,8000,45,prestamo
 122,Jane Smith,12000,25,prestamo
 140,Steve Rogers,7000,40,ahorro
 128,Jane Smith,8000,35,ahorro
-105,Jane Smith,8000,40,prestamo
 134,Alice Brown,10000,30,prestamo
 124,Bob Johnson,10000,25,prestamo
 147,Alice Brown,12000,40,ahorro
 121,Steve Rogers,5000,35,prestamo
-106,Unknown,7000,30,ahorro
 130,Steve Rogers,5000,45,prestamo
 123,Bob Johnson,5000,25,ahorro
 141,Steve Rogers,8000,35,ahorro
 146,Charlie Green,7000,30,ahorro
-124,Diana Prince,12000,45,ahorro
 116,Unknown,12000,25,prestamo
-141,Bob Johnson,8000,30,prestamo
 120,Jane Smith,5000,40,prestamo
-140,Alice Brown,5000,25,ahorro
-130,Jane Smith,10000,45,prestamo
 150,Bob Johnson,8000,40,ahorro
-122,Unknown,12000,45,prestamo
-140,John Doe,7000,30,ahorro
 144,Alice Brown,8000,45,ahorro
 101,Diana Prince,8000,35,ahorro
 119,Steve Rogers,8000,40,prestamo
-127,Steve Rogers,5000,45,ahorro
-150,Charlie Green,12000,45,prestamo
 148,Jane Smith,8000,25,ahorro
 131,Alice Brown,7000,45,ahorro
-134,Diana Prince,12000,30,ahorro
-133,Alice Brown,7000,30,ahorro
 110,Steve Rogers,8000,30,prestamo
 107,Alice Brown,10000,40,prestamo
-124,John Doe,7000,30,prestamo
-111,Steve Rogers,5000,35,ahorro
-126,Jane Smith,7000,40,ahorro
-101,Diana Prince,12000,40,prestamo
-119,Diana Prince,10000,40,ahorro
-134,Diana Prince,12000,35,prestamo
 117,Bob Johnson,7000,40,ahorro
 103,Diana Prince,8000,45,prestamo
-122,Diana Prince,8000,30,ahorro
 138,Jane Smith,7000,45,ahorro
 129,Steve Rogers,7000,45,ahorro
-106,Charlie Green,12000,35,ahorro
-133,Jane Smith,12000,45,ahorro
 135,Alice Brown,12000,45,prestamo
 104,Unknown,10000,25,ahorro
 115,John Doe,5000,35,ahorro
-138,Diana Prince,5000,40,ahorro
 149,Charlie Green,12000,40,prestamo
-118,John Doe,7000,35,prestamo
-129,Bob Johnson,12000,45,prestamo
-126,Diana Prince,5000,45,ahorro
-134,Unknown,7000,45,ahorro
-115,John Doe,10000,35,prestamo
-123,Unknown,10000,35,prestamo
 143,John Doe,12000,35,prestamo
-150,John Doe,7000,40,ahorro
-149,Unknown,8000,40,ahorro
 114,Jane Smith,5000,35,ahorro
-118,Jane Smith,10000,45,ahorro
-133,Alice Brown,5000,35,prestamo
-130,Jane Smith,8000,25,prestamo
-104,Bob Johnson,12000,30,prestamo
-121,Diana Prince,7000,45,prestamo
-134,Charlie Green,10000,45,prestamo
-138,Jane Smith,7000,45,prestamo
+136,Jane Smith,7000,40,ahorro
 112,Bob Johnson,10000,30,ahorro
-118,Diana Prince,7000,40,prestamo
-141,John Doe,12000,25,ahorro
 102,Charlie Green,12000,40,ahorro
-136,Alice Brown,5000,25,prestamo
-122,Bob Johnson,5000,40,ahorro
-134,Bob Johnson,5000,25,prestamo
-150,Alice Brown,7000,35,ahorro
-140,Alice Brown,8000,40,ahorro
-147,Charlie Green,7000,25,prestamo
-102,Alice Brown,8000,45,prestamo
-104,Steve Rogers,10000,25,prestamo
-130,John Doe,5000,25,prestamo
-136,Diana Prince,5000,40,prestamo
-105,Unknown,10000,45,prestamo
-135,Steve Rogers,12000,25,ahorro
-126,John Doe,5000,45,ahorro
-138,Alice Brown,12000,30,ahorro
-129,Diana Prince,8000,45,ahorro
-138,Jane Smith,12000,30,prestamo
-123,John Doe,5000,25,ahorro
 139,Charlie Green,10000,40,ahorro
-147,Steve Rogers,8000,30,ahorro
-120,Steve Rogers,7000,30,ahorro
-126,Alice Brown,5000,40,prestamo
-105,Steve Rogers,10000,35,prestamo
-133,Steve Rogers,10000,45,prestamo
-105,Alice Brown,8000,25,prestamo
-141,Jane Smith,8000,30,prestamo
-129,Jane Smith,10000,25,prestamo
-146,Charlie Green,7000,40,ahorro
-135,Unknown,10000,45,ahorro
-149,John Doe,10000,25,ahorro
-144,Alice Brown,10000,45,ahorro
-148,Bob Johnson,7000,30,ahorro
-139,John Doe,10000,35,ahorro
+145,Diana Prince,12000,35,prestamo
 142,Bob Johnson,7000,25,ahorro
-135,John Doe,12000,40,prestamo
-106,Charlie Green,8000,25,prestamo
-140,Jane Smith,7000,25,prestamo
-111,Alice Brown,5000,45,prestamo
-113,Bob Johnson,5000,35,prestamo
-111,Steve Rogers,10000,30,ahorro
-119,Unknown,5000,40,prestamo
-102,Charlie Green,10000,35,prestamo
-142,Alice Brown,10000,25,ahorro
-105,Alice Brown,10000,25,prestamo
 125,Diana Prince,5000,35,prestamo
-123,John Doe,7000,25,prestamo
-137,Alice Brown,7000,40,ahorro
-118,Jane Smith,12000,35,ahorro
-128,Diana Prince,8000,40,ahorro
-149,Bob Johnson,5000,45,ahorro
-140,Charlie Green,8000,30,prestamo
-122,Unknown,10000,30,ahorro
-117,Unknown,5000,45,ahorro
-128,Unknown,10000,30,prestamo
-149,Steve Rogers,7000,25,ahorro
-106,Unknown,8000,25,ahorro
-113,Diana Prince,5000,35,ahorro
-106,Diana Prince,10000,35,ahorro
-128,Diana Prince,7000,35,prestamo
-108,John Doe,8000,25,prestamo
-108,Jane Smith,5000,35,prestamo
-114,Unknown,8000,35,ahorro
 132,John Doe,12000,45,prestamo
-106,Alice Brown,8000,40,prestamo
 109,John Doe,7000,40,prestamo
-130,Steve Rogers,5000,30,ahorro
-122,Bob Johnson,10000,40,ahorro
-128,John Doe,5000,30,prestamo
-119,John Doe,5000,35,prestamo
-108,Alice Brown,5000,45,ahorro
-123,Diana Prince,10000,25,ahorro
-135,Bob Johnson,10000,30,prestamo
-149,Steve Rogers,8000,25,prestamo
-115,Charlie Green,5000,35,prestamo
-110,Charlie Green,10000,25,prestamo
-122,Alice Brown,5000,30,ahorro
-144,John Doe,7000,45,ahorro
-128,John Doe,12000,40,ahorro
-122,Steve Rogers,10000,40,ahorro
-141,Bob Johnson,5000,40,prestamo
-105,Steve Rogers,10000,35,ahorro
-117,Diana Prince,12000,30,prestamo

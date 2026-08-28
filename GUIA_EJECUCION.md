@@ -96,7 +96,7 @@ FIN JOB [transaccionesDiariasParticionadoJob] - estado=COMPLETED | duracion=<N4>
 Para completar la conclusión con datos reales: copia aquí, en esta misma sección, la tabla de
 duraciones obtenida en TU corrida real de GitHub Actions, y marca cuál configuración resultó
 más rápida para las 1000 filas del dataset oficial de la semana 3 (nota: el benchmark corre
-sobre `transacciones.csv` con el `ItemProcessor` real, por lo que el 21.5% de omisión del
+sobre `transacciones.csv` con el `ItemProcessor` real, por lo que el 23.9% de omisión del
 dataset oficial -sección 1.1- también aplica aquí; no afecta la comparación porque todas las
 configuraciones del benchmark procesan el mismo archivo). Como referencia de qué esperar (a
 confirmar con la corrida real, no asumir sin verificar):
@@ -108,6 +108,11 @@ confirmar con la corrida real, no asumir sin verificar):
 | `hilos=6` | multi-hilo | Con 1000 filas y chunk=5 (200 chunks), más hilos que trabajo disponible puede no mejorar sobre `hilos=3`, o incluso empeorar por overhead de coordinación/contención de conexiones |
 | `chunk-size` pequeño (1) vs. grande (50) | multi-hilo | Chunks muy pequeños multiplican los commits (overhead de transacción); chunks muy grandes reducen el paralelismo real percibido y agrandan el radio de una eventual falla/reintento |
 | `grid-size` 1, 2, 4, 6 | particionado | Cada partición abre su propio archivo y su propia conexión: para un archivo de 1000 filas, el overhead de abrir N streams puede pesar más que el procesamiento en sí a partir de cierto `grid-size` — la corrida real debe mostrar en qué punto deja de compensar |
+
+Nota: en todas estas corridas el Job termina en `BatchStatus.COMPLETED` con `ExitStatus`
+`REVISION_REQUERIDA` (no `FAILED`) — es la conducta esperada del `ControlCalidadDecider` frente
+al dataset oficial completo, ver sección 5 del `README.md`; no indica un problema con la
+configuración de escalado que se está comparando.
 
 **Conclusión (completar con los números reales de tu corrida):** la configuración óptima
 para este volumen de datos (1000 filas) es `______`, porque `______`. Para un volumen de datos
@@ -164,10 +169,16 @@ mvn clean package
 java -jar target/banco-xyz-batch-1.0.0.jar transacciones
 java -jar target/banco-xyz-batch-1.0.0.jar intereses
 java -jar target/banco-xyz-batch-1.0.0.jar cuentas-anuales
+# transacciones e intereses terminan COMPLETED con ExitStatus REVISION_REQUERIDA (23.9% y
+# 80.4% de omision real respectivamente, no es un FAILED); cuentas-anuales, CALIDAD_OK (~6%)
 
-# rama CALIDAD_OK del decider, con el subconjunto curado (0% de omision por diseno):
+# rama CALIDAD_OK del decider, con el subconjunto curado (0% de omision, verificado):
 java -jar target/banco-xyz-batch-1.0.0.jar transacciones \
   --batch.rutas.transacciones=classpath:sample-data/transacciones.csv
+# intereses no tiene Step de purga propio (upsert-only): se vacia cuentas_interes antes de esta
+# corrida para que no la contamine el estado (claves naturales) que dejo la corrida completa
+docker exec -it banco-xyz-postgres psql -U banco_xyz -d banco_xyz \
+  -c "TRUNCATE TABLE cuentas_interes;"
 java -jar target/banco-xyz-batch-1.0.0.jar intereses \
   --batch.rutas.intereses=classpath:sample-data/intereses.csv
 
@@ -193,8 +204,8 @@ y toma una captura de pantalla de al menos una corrida completa mostrando los hi
 | Archivo / captura | Qué demuestra |
 |---|---|
 | Log del build (`mvn clean package` exitoso) | El proyecto compila |
-| Log de `transaccionesDiariasJob` (dataset oficial) | Chunks + 3 hilos + rama `REVISION_REQUERIDA` (21.5% de omisión real) |
-| Log de `interesesMensualesJob` (dataset oficial) | Cálculo de intereses + upsert + rama `REVISION_REQUERIDA` (83.6% de omisión real) |
+| Log de `transaccionesDiariasJob` (dataset oficial) | Chunks + 3 hilos + rama `REVISION_REQUERIDA` (23.9% de omisión real: 215 al procesar + 24 por duplicado al escribir); Job en `COMPLETED` / `ExitStatus` `REVISION_REQUERIDA`, no `FAILED` |
+| Log de `interesesMensualesJob` (dataset oficial) | Cálculo de intereses + upsert + rama `REVISION_REQUERIDA` (80.4% de omisión real); Job en `COMPLETED` / `ExitStatus` `REVISION_REQUERIDA`, no `FAILED` |
 | Log de `estadosCuentaAnualesJob` (dataset oficial) | Agregación anual por cuenta + rama `CALIDAD_OK` (6% de omisión real) |
 | Logs de las corridas con `sample-data/transacciones.csv` y `sample-data/intereses.csv` | Rama `CALIDAD_OK` del decider, también para esos dos Jobs |
 | Log o captura de las consultas SQL | Los datos realmente quedaron en PostgreSQL |
@@ -215,6 +226,11 @@ y toma una captura de pantalla de al menos una corrida completa mostrando los hi
   corridas contra `sample-data/` (subconjunto curado) y en `estadosCuentaAnualesJob`, la
   misma línea pero con `CALIDAD_OK`: el `JobExecutionDecider` mostrando ambas ramas con datos
   reales (criterio "políticas de finalización y re-ejecución").
+- En la línea final `FIN JOB [...] - estado=<X> | ...`, cuando la rama fue `REVISION_REQUERIDA`
+  el `estado` correcto es **`COMPLETED`** (no `FAILED`): la revisión requerida es una detención
+  intencional antes del reporte final, no una falla del framework — ver la nota sobre el fix de
+  `FlowBuilder.addDanglingEndStates()` en la sección 5 del `README.md` si ves `FAILED` en una
+  copia desactualizada del proyecto.
 - **`[Particion-Thread-0]`, `[Particion-Thread-1]`, ...** intercalados en el log del Job
   particionado: varias particiones procesando rangos disjuntos del archivo al mismo tiempo
   (criterio 4 de la pauta S3, técnica de escalado alternativa).
